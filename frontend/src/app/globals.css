@@ -1,0 +1,220 @@
+@import "tailwindcss";
+
+/* ─── Subdued Chiaroscuro Theme (Dull Titanium, Slate & Charcoal) ──── */
+:root {
+  /* Surface Layers (Deep Matte Charcoal & Slate) */
+  --bg-base:     #0c0d12; /* Base canvas */
+  --bg-surface:  #12131a; /* Workbenches, sidebars, rails */
+  --bg-elevated: #161822; /* Cards, panels, inputs */
+  --bg-overlay:  #1a1d28; /* Elevated drawers, popovers, modals */
+
+  /* Hairline Borders */
+  --border-subtle:  rgba(255, 255, 255, 0.07);
+  --border-default: rgba(255, 255, 255, 0.11);
+  --border-strong:  rgba(255, 255, 255, 0.16);
+
+  /* Typography Scale */
+  --text-primary:   #f4f4f5; /* Zinc-100 (headings & primary) */
+  --text-secondary: #d4d4d8; /* Zinc-300 (body text) */
+  --text-muted:     #a1a1aa; /* Zinc-400 (labels & captions) */
+  --text-disabled:  #71717a; /* Zinc-500 (micro metadata) */
+
+  /* Subdued Neutral Accents */
+  --accent-neutral:       #e4e4e7;
+  --accent-neutral-muted: #a1a1aa;
+
+  /* Fonts */
+  --font-sans: var(--font-sans), 'Inter', system-ui, -apple-system, sans-serif;
+  --font-serif: var(--font-serif), 'Newsreader', Georgia, serif;
+  --font-mono: var(--font-mono), 'JetBrains Mono', monospace;
+}
+
+.font-serif {
+  font-family: var(--font-serif);
+}
+
+.font-mono {
+  font-family: var(--font-mono);
+}
+
+/* ─── Base Reset & Foundations ─────────────────────────────────── */
+@layer base {
+  * {
+    box-sizing: border-box;
+    border-color: var(--border-subtle);
+    -webkit-font-smoothing: antialiased;
+    -moz-osx-font-smoothing: grayscale;
+  }
+
+  html {
+    color-scheme: dark;
+    background-color: var(--bg-base);
+  }
+
+  body {
+    background-color: var(--bg-base);
+    color: var(--text-primary);
+    font-family: var(--font-sans);
+    letter-spacing: -0.011em;
+  }
+
+  /* Minimalist Muted Scrollbar */
+  ::-webkit-scrollbar { width: 5px; height: 5px; }
+  ::-webkit-scrollbar-track { background: transparent; }
+  ::-webkit-scrollbar-thumb { background: rgba(255, 255, 255, 0.1); border-radius: 4px; }
+  ::-webkit-scrollbar-thumb:hover { background: rgba(255, 255, 255, 0.2); }
+
+  /* Subdued Focus Ring */
+  :focus-visible {
+    outline: 1.5px solid rgba(255, 255, 255, 0.3);
+    outline-offset: 2px;
+    border-radius: 6px;
+  }
+}
+
+/* ─── Subtle Ambient Backgrounds ───────────────────────────────── */
+.bg-dot-grid {
+  background-image: radial-gradient(rgba(255, 255, 255, 0.06) 1px, transparent 1px);
+  background-size: 24px 24px;
+}
+
+/* ─── Typography Utilities ─────────────────────────────────────── */
+.heading-hero {
+  font-size: clamp(2.5rem, 5.5vw, 4.5rem);
+  font-weight: 700;
+  letter-spacing: -0.035em;
+  line-height: 1.08;
+  color: var(--text-primary);
+}
+
+.heading-xl {
+  font-size: 2rem;
+  font-weight: 650;
+  letter-spacing: -0.025em;
+  line-height: 1.15;
+}
+
+.heading-lg {
+  font-size: 1.375rem;
+  font-weight: 600;
+  letter-spacing: -0.02em;
+  line-height: 1.25;
+}
+
+/* ─── Surface & Layer Components ───────────────────────────────── */
+.surface-panel {
+  background-color: var(--bg-surface);
+  border: 1px solid var(--border-subtle);
+  border-radius: 12px;
+}
+
+.surface-elevated {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  border-radius: 12px;
+}
+
+.surface-overlay {
+  background-color: var(--bg-overlay);
+  border: 1px solid var(--border-strong);
+  border-radius: 12px;
+  box-shadow: 0 20px 40px -15px rgba(0, 0, 0, 0.7);
+}
+
+/* ─── Subdued Buttons & Interactive Elements ─────────────────────── */
+.btn-primary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: #e4e4e7; /* Zinc-200 */
+  color: #09090b; /* Zinc-950 */
+  font-weight: 600;
+  font-size: 0.8125rem;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  box-shadow: 0 1px 2px rgba(0, 0, 0, 0.2);
+  transition: all 150ms ease;
+  cursor: pointer;
+  user-select: none;
+}
+.btn-primary:hover {
+  background-color: #ffffff;
+}
+.btn-primary:active {
+  transform: scale(0.985);
+}
+
+.btn-secondary {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 0.5rem;
+  background-color: rgba(255, 255, 255, 0.04);
+  color: #d4d4d8;
+  border: 1px solid rgba(255, 255, 255, 0.09);
+  font-weight: 500;
+  font-size: 0.8125rem;
+  padding: 0.5rem 1rem;
+  border-radius: 8px;
+  transition: all 150ms ease;
+  cursor: pointer;
+  user-select: none;
+}
+.btn-secondary:hover {
+  background-color: rgba(255, 255, 255, 0.08);
+  border-color: rgba(255, 255, 255, 0.18);
+  color: #fafaf9;
+}
+.btn-secondary:active {
+  transform: scale(0.985);
+}
+
+/* Dull Silver Citation Badges */
+.citation-badge {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  font-family: var(--font-mono);
+  font-size: 0.6875rem;
+  font-weight: 600;
+  color: #d4d4d8; /* Zinc-300 */
+  background: rgba(255, 255, 255, 0.06);
+  border: 1px solid rgba(255, 255, 255, 0.12);
+  border-radius: 4px;
+  padding: 0.05rem 0.35rem;
+  margin: 0 0.15rem;
+  transition: all 120ms ease;
+  cursor: pointer;
+  text-decoration: none;
+}
+.citation-badge:hover {
+  background: rgba(255, 255, 255, 0.12);
+  border-color: rgba(255, 255, 255, 0.25);
+  color: #ffffff;
+}
+
+/* ─── Form Inputs ──────────────────────────────────────────────── */
+.input-base {
+  background-color: var(--bg-elevated);
+  border: 1px solid var(--border-default);
+  color: var(--text-primary);
+  border-radius: 8px;
+  transition: all 150ms ease;
+  outline: none;
+}
+.input-base::placeholder { color: var(--text-muted); }
+.input-base:focus {
+  border-color: rgba(255, 255, 255, 0.25);
+  background-color: #171822;
+}
+
+/* ─── Print & PDF Export ───────────────────────────────────────── */
+@media print {
+  header, nav, .no-print, button { display: none !important; }
+  body, main {
+    background: #ffffff !important;
+    color: #111827 !important;
+    font-size: 11pt !important;
+  }
+}
