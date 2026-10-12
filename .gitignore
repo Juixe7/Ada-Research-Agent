@@ -1,0 +1,44 @@
+# Environment Variables & Secrets
+.env
+.env.*
+**/.env
+**/.env.*
+!.env.example
+*.pem
+*.key
+
+# Local Environments & Databases
+.venv/
+venv/
+**/__pycache__/
+**/*.pyc
+.pytest_cache/
+**/qdrant_storage/
+qdrant_data/
+uploads/
+dossiers/*.json
+dossiers/*.html
+dossiers/*.md
+*.db
+*.db-shm
+*.db-wal
+
+# Node Modules & Frontend Builds
+**/node_modules/
+frontend/.next/
+frontend/out/
+frontend/build/
+frontend/*.tsbuildinfo
+.agents/
+
+# Local Notes & Interview Prep
+interview_guide/
+BIG.md
+INTERVIEW_QUESTIONS.md
+MASTER_REQUIREMENTS_AND_PHASED_PLAN.md
+bugs.md
+DEPLOYMENT.md
+
+# OS Artifacts
+.DS_Store
+Thumbs.db
