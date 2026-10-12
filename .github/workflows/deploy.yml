@@ -1,0 +1,111 @@
+name: Ada CI/CD — Test & Deploy to AWS EC2
+
+on:
+  push:
+    branches:
+      - main
+      - master
+  workflow_dispatch:
+
+jobs:
+  verify:
+    name: 1. E2E Security Audit & TypeScript Check
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout Repository
+        uses: actions/checkout@v4
+
+      - name: Set up Python 3.12
+        uses: actions/setup-python@v5
+        with:
+          python-version: "3.12"
+          cache: "pip"
+
+      - name: Install Python Dependencies
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+
+      - name: Run E2E Functional & Security Test Suite
+        env:
+          DATABASE_URL: sqlite:///./test_ci.db
+          JWT_SECRET: ci-test-jwt-secret-key-2026
+        run: |
+          python tests/test_e2e_audit.py
+
+      - name: Set up Node.js 20
+        uses: actions/setup-node@v4
+        with:
+          node-version: "20"
+          cache: "npm"
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install Frontend Dependencies & Run TypeScript Check
+        working-directory: ./frontend
+        run: |
+          npm ci
+          npx tsc --noEmit
+
+  deploy:
+    name: 2. Deploy Docker Stack to AWS EC2 (t3.small)
+    needs: verify
+    runs-on: ubuntu-latest
+    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    steps:
+      - name: Deploy via SSH to EC2 Instance
+        uses: appleboy/ssh-action@v1.0.3
+        with:
+          host: ${{ secrets.EC2_HOST }}
+          username: ${{ secrets.EC2_USER || 'ubuntu' }}
+          key: ${{ secrets.EC2_SSH_KEY }}
+          port: 22
+          command_timeout: 20m
+          script: |
+            set -euo pipefail
+            APP_DIR="$HOME/ada-deep-research"
+
+            # Clone or pull latest repository code
+            if [ ! -d "$APP_DIR/.git" ]; then
+              git clone https://github.com/${{ github.repository }}.git "$APP_DIR"
+            fi
+            cd "$APP_DIR"
+            git fetch --all
+            git reset --hard origin/${{ github.ref_name }}
+
+            # Ensure 2GB Swap and Docker are active on t3.small
+            chmod +x scripts/setup_ec2.sh
+            ./scripts/setup_ec2.sh
+
+            # Write production .env from GitHub Actions Secrets
+            cat <<EOF > .env
+            GROQ_API_KEY=${{ secrets.GROQ_API_KEY }}
+            GEMINI_API_KEY=${{ secrets.GEMINI_API_KEY }}
+            SERPER_API_KEY=${{ secrets.SERPER_API_KEY }}
+            DATABASE_URL=${{ secrets.DATABASE_URL }}
+            JWT_SECRET=${{ secrets.JWT_SECRET }}
+            DOMAIN_NAME=${{ secrets.DOMAIN_NAME || ':80' }}
+            REDIS_URL=redis://redis:6379/0
+            QDRANT_URL=http://qdrant:6333
+            USE_CELERY=true
+            EOF
+            chmod 600 .env
+
+            # Build and launch the 6-container stack sequentially to respect 2GB RAM
+            sudo docker compose build backend celery_worker
+            sudo docker compose build frontend
+            sudo docker compose up -d --remove-orphans
+
+            # Prune dangling layers to keep EBS disk clean
+            sudo docker image prune -f
+
+            # Wait for FastAPI health check via Caddy or Backend
+            echo "Waiting for Ada Deep Research services to pass health check..."
+            for i in {1..15}; do
+              if sudo docker compose exec -T backend curl -sf http://localhost:8000/health > /dev/null; then
+                echo "✅ Ada Deep Research is LIVE and healthy!"
+                exit 0
+              fi
+              sleep 3
+            done
+            sudo docker compose logs --tail=50
+            exit 1

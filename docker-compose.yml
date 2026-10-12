@@ -1,0 +1,108 @@
+services:
+  redis:
+    image: redis:7-alpine
+    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
+    restart: unless-stopped
+    volumes:
+      - redis_data:/data
+    networks:
+      - ada_network
+
+  qdrant:
+    image: qdrant/qdrant:latest
+    restart: unless-stopped
+    volumes:
+      - qdrant_storage:/qdrant/storage
+    networks:
+      - ada_network
+
+  backend:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: uvicorn engine.server:app --host 0.0.0.0 --port 8000 --workers 1
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - USE_CELERY=true
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/ada.db}
+      - JWT_SECRET=${JWT_SECRET:-ada-secret-key-prod-2026}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SERPER_API_KEY=${SERPER_API_KEY}
+    volumes:
+      - sqlite_data:/app/data
+      - uploads_data:/app/uploads
+      - dossiers_data:/app/dossiers
+    depends_on:
+      - redis
+      - qdrant
+    networks:
+      - ada_network
+
+  celery_worker:
+    build:
+      context: .
+      dockerfile: Dockerfile
+    command: celery -A engine.celery_app worker --pool=threads --concurrency=2 --loglevel=info
+    restart: unless-stopped
+    environment:
+      - REDIS_URL=redis://redis:6379/0
+      - QDRANT_URL=http://qdrant:6333
+      - USE_CELERY=true
+      - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/ada.db}
+      - JWT_SECRET=${JWT_SECRET:-ada-secret-key-prod-2026}
+      - GROQ_API_KEY=${GROQ_API_KEY}
+      - GEMINI_API_KEY=${GEMINI_API_KEY}
+      - SERPER_API_KEY=${SERPER_API_KEY}
+    volumes:
+      - sqlite_data:/app/data
+      - uploads_data:/app/uploads
+      - dossiers_data:/app/dossiers
+    depends_on:
+      - redis
+      - qdrant
+    networks:
+      - ada_network
+
+  frontend:
+    build:
+      context: ./frontend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    depends_on:
+      - backend
+    networks:
+      - ada_network
+
+  caddy:
+    image: caddy:2-alpine
+    restart: unless-stopped
+    ports:
+      - "80:80"
+      - "443:443"
+    environment:
+      - DOMAIN_NAME=${DOMAIN_NAME:-:80}
+    volumes:
+      - ./Caddyfile:/etc/caddy/Caddyfile
+      - caddy_data:/data
+      - caddy_config:/config
+    depends_on:
+      - frontend
+      - backend
+    networks:
+      - ada_network
+
+networks:
+  ada_network:
+    driver: bridge
+
+volumes:
+  redis_data:
+  sqlite_data:
+  uploads_data:
+  dossiers_data:
+  qdrant_storage:
+  caddy_data:
+  caddy_config:

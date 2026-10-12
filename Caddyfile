@@ -1,0 +1,22 @@
+# Caddy configuration for Ada Deep Research on AWS EC2
+# Set DOMAIN_NAME=ada.yourdomain.com in .env for automatic Let's Encrypt HTTPS,
+# or leave DOMAIN_NAME unset to serve on :80 via EC2 Public IP.
+
+{$DOMAIN_NAME::80} {
+    # Reverse proxy API requests to FastAPI backend
+    handle /api/* {
+        reverse_proxy backend:8000
+    }
+
+    handle /health {
+        reverse_proxy backend:8000
+    }
+
+    # Reverse proxy all frontend routes to Next.js
+    handle {
+        reverse_proxy frontend:3000
+    }
+
+    # Enable compression
+    encode gzip zstd
+}
