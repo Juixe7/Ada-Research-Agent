@@ -10,6 +10,13 @@ from engine.config import (
     GEMINI_SYNTHESIS_MODEL
 )
 
+LAST_LLM_ERROR: Optional[str] = None
+
+def get_last_llm_error() -> Optional[str]:
+    """Returns the most recent LLM provider error message for actionable diagnosis."""
+    global LAST_LLM_ERROR
+    return LAST_LLM_ERROR
+
 def call_resilient_llm(
     system_prompt: str,
     user_prompt: str,
@@ -21,6 +28,9 @@ def call_resilient_llm(
     Bulletproof multi-tier LLM routing with automatic exponential backoff on 429
     and seamless provider fallback (Groq -> Gemini).
     """
+    global LAST_LLM_ERROR
+    LAST_LLM_ERROR = None
+
     # ── Tier 1: Groq with Exponential Backoff on 429 ──
     if GROQ_API_KEY:
         client = Groq(api_key=GROQ_API_KEY)
@@ -43,6 +53,7 @@ def call_resilient_llm(
                     return resp.choices[0].message.content.strip()
             except Exception as e:
                 err_msg = str(e)
+                LAST_LLM_ERROR = f"Groq error: {err_msg}"
                 print(f"[llm_resilient] Groq attempt {attempt+1} notice: {err_msg[:120]}")
                 if ("429" in err_msg or "rate" in err_msg.lower() or "quota" in err_msg.lower()) and attempt == 0:
                     time.sleep(2)
@@ -71,6 +82,7 @@ def call_resilient_llm(
             if resp and resp.text:
                 return resp.text.strip()
         except Exception as gemini_err:
+            LAST_LLM_ERROR = f"Gemini fallback error: {gemini_err}"
             print(f"[llm_resilient] Gemini fallback error: {gemini_err}")
 
     return None

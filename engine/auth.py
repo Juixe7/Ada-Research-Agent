@@ -1,4 +1,5 @@
 import re
+import secrets
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import bcrypt
@@ -10,7 +11,7 @@ from sqlalchemy.orm import Session
 
 from engine.config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRY_DAYS
 from engine.database import get_db
-from engine.models import User, ResearchSession, ResearchTurn, VaultDocument
+from engine.models import User, ResearchSession, ResearchTurn, VaultDocument, PasswordResetToken
 
 auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 security = HTTPBearer(auto_error=False)
@@ -92,6 +93,13 @@ class RegisterRequest(BaseModel):
 class LoginRequest(BaseModel):
     login: str  # Email or username
     password: str
+
+class ForgotPasswordRequest(BaseModel):
+    login: str  # Email or username
+
+class ResetPasswordRequest(BaseModel):
+    token: str
+    new_password: str = Field(..., min_length=6, max_length=128)
 
 class ChangePasswordRequest(BaseModel):
     current_password: str
@@ -208,3 +216,82 @@ def change_password(
     user.password_hash = hash_password(req.new_password)
     db.commit()
     return {"status": "ok", "message": "Password updated successfully."}
+
+@auth_router.post("/forgot-password")
+def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
+    clean_login = req.login.strip().lower()
+    user = db.query(User).filter(
+        (User.email == clean_login) | (User.username == req.login.strip())
+    ).first()
+
+    if not user:
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="No account found matching this email or username."
+        )
+
+    # Invalidate any existing unused reset tokens for this user
+    db.query(PasswordResetToken).filter(PasswordResetToken.user_id == user.id).delete()
+
+    reset_token = secrets.token_urlsafe(32)
+    expires_at = datetime.now(timezone.utc) + timedelta(minutes=15)
+
+    token_record = PasswordResetToken(
+        user_id=user.id,
+        token=reset_token,
+        expires_at=expires_at
+    )
+    db.add(token_record)
+    db.commit()
+
+    return {
+        "status": "ok",
+        "message": "Reset token generated successfully. Valid for 15 minutes.",
+        "reset_token": reset_token,
+        "username": user.username,
+        "expires_in_minutes": 15
+    }
+
+@auth_router.post("/reset-password")
+def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
+    clean_token = req.token.strip()
+    token_record = db.query(PasswordResetToken).filter(
+        PasswordResetToken.token == clean_token
+    ).first()
+
+    if not token_record:
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Invalid or unrecognized reset token."
+        )
+
+    # Verify expiration (ensure tz-aware comparison)
+    token_exp = token_record.expires_at
+    if token_exp.tzinfo is None:
+        token_exp = token_exp.replace(tzinfo=timezone.utc)
+
+    if datetime.now(timezone.utc) > token_exp:
+        db.delete(token_record)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_400_BAD_REQUEST,
+            detail="Password reset token has expired. Please request a new one."
+        )
+
+    user = db.query(User).filter(User.id == token_record.user_id).first()
+    if not user:
+        db.delete(token_record)
+        db.commit()
+        raise HTTPException(
+            status_code=status.HTTP_404_NOT_FOUND,
+            detail="Associated user account no longer exists."
+        )
+
+    user.password_hash = hash_password(req.new_password)
+    db.delete(token_record)
+    db.commit()
+
+    return {
+        "status": "ok",
+        "message": "Password successfully reset. You can now sign in with your new password."
+    }

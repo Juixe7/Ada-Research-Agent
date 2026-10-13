@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useState, use, useMemo } from "react";
+import { useEffect, useState, use, useMemo, useRef } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { 
@@ -22,6 +22,7 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
   // Report & Pipeline State
   const [report, setReport] = useState<any>(null);
   const [status, setStatus] = useState<string>("planning");
+  const [initialLoading, setInitialLoading] = useState(true);
   const [stage, setStage] = useState<string>("Initializing investigation...");
   const [progress, setProgress] = useState(10);
   const [elapsedSec, setElapsedSec] = useState(0);
@@ -43,6 +44,8 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
   const [inspectorOpen, setInspectorOpen] = useState(false);
 
   // Highlight Q&A (Reading Assistant) State
+  const floatingMenuRef = useRef<HTMLDivElement>(null);
+  const selectedTextRef = useRef<string>("");
   const [floatingMenu, setFloatingMenu] = useState<{ text: string; x: number; y: number } | null>(null);
   const [highlightQuestion, setHighlightQuestion] = useState("");
   const [highlightAnswer, setHighlightAnswer] = useState<string | null>(null);
@@ -68,10 +71,10 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
 
   // Timer during active execution
   useEffect(() => {
-    if (status === "completed" || status === "failed" || status === "cancelled") return;
+    if (initialLoading || status === "completed" || status === "failed" || status === "cancelled" || status === "not_found") return;
     const interval = setInterval(() => setElapsedSec(s => s + 1), 1000);
     return () => clearInterval(interval);
-  }, [status]);
+  }, [status, initialLoading]);
 
   // Status Polling Loop
   useEffect(() => {
@@ -81,7 +84,13 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
     const fetchStatus = async () => {
       try {
         const res = await fetch(`${API_URL}/api/report/status/${reportId}`);
-        if (!res.ok) return;
+        if (!res.ok) {
+          if (res.status === 404 && isMounted) {
+            setStatus("not_found");
+            if (pollInterval) clearInterval(pollInterval);
+          }
+          return;
+        }
         const data = await res.json();
         if (!isMounted) return;
 
@@ -103,6 +112,10 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
         }
       } catch (err) {
         console.warn("Status poll warning:", err);
+      } finally {
+        if (isMounted) {
+          setInitialLoading(false);
+        }
       }
     };
 
@@ -163,7 +176,12 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
 
   // Text selection handler for reading assistant
   useEffect(() => {
-    const handleMouseUp = () => {
+    const handleMouseUp = (e: MouseEvent) => {
+      // If clicking inside the floating toolbar, do not close or clear
+      if (floatingMenuRef.current && floatingMenuRef.current.contains(e.target as Node)) {
+        return;
+      }
+
       const selection = window.getSelection();
       if (!selection || selection.isCollapsed) {
         setFloatingMenu(null);
@@ -171,12 +189,13 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
       }
       const text = selection.toString().trim();
       if (text.length > 8) {
+        selectedTextRef.current = text;
         const range = selection.getRangeAt(0);
         const rect = range.getBoundingClientRect();
         setFloatingMenu({
           text,
           x: rect.left + rect.width / 2,
-          y: rect.top - 38
+          y: Math.max(10, rect.top - 44)
         });
       } else {
         setFloatingMenu(null);
@@ -200,11 +219,12 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
           question: question
         })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.answer) {
         setHighlightAnswer(data.answer);
       } else {
-        setHighlightAnswer("Unable to extract an answer for this passage.");
+        const errorMsg = data?.detail || data?.message || (res.status === 429 ? "AI rate limit reached. Please wait 30 seconds." : "Unable to extract an answer for this passage.");
+        setHighlightAnswer(errorMsg);
       }
     } catch (err: any) {
       setHighlightAnswer("Error contacting inline assistant.");
@@ -214,11 +234,12 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
   };
 
   const handleOpenReadingAssistant = (presetPrompt?: string) => {
-    if (!floatingMenu) return;
-    const textToQuery = floatingMenu.text;
+    const textToQuery = selectedTextRef.current || floatingMenu?.text || "";
+    if (!textToQuery) return;
     setAssistantSelectedText(textToQuery);
     setHighlightQuestion(presetPrompt || "");
     setHighlightAnswer(null);
+    setInspectorOpen(false);
     setReadingAssistantOpen(true);
     setFloatingMenu(null);
     if (presetPrompt) {
@@ -277,19 +298,21 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
           context: report?.monograph?.slice(0, 800) || ""
         })
       });
-      const data = await res.json();
+      const data = await res.json().catch(() => ({}));
       if (res.ok && data.addendum_markdown) {
         setReport((prev: any) => ({
           ...prev,
-          monograph: (prev.monograph || "") + "\n\n" + data.addendum_markdown
+          monograph: data.monograph || ((prev?.monograph || prev?.report_markdown || "") + "\n\n" + data.addendum_markdown),
+          report_markdown: data.updated_report_markdown || ((prev?.report_markdown || prev?.monograph || "") + "\n\n" + data.addendum_markdown)
         }));
         setAddendumInquiry("");
         showToast("Authoritative Addendum appended to monograph.");
       } else {
-        showToast("Failed to generate Addendum.");
+        const errorMsg = data?.detail || data?.message || (res.status === 429 ? "AI rate limit reached. Please wait 30 seconds." : "Failed to generate Addendum.");
+        showToast(errorMsg);
       }
-    } catch (err) {
-      showToast("Error generating Addendum.");
+    } catch (err: any) {
+      showToast(err?.message || "Error generating Addendum.");
     } finally {
       setAddendumLoading(false);
     }
@@ -555,6 +578,37 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
               </button>
             )}
 
+            {/* Evidence Inspector Toggle */}
+            {status === "completed" && sourceCount > 0 && (
+              <button
+                type="button"
+                onClick={() => {
+                  if (!inspectorOpen && !selectedCitation && report?.evidence_manifest?.length > 0) {
+                    const firstEv = report.evidence_manifest[0];
+                    setSelectedCitation({
+                      id: firstEv.source_id,
+                      title: firstEv.title || firstEv.doc_name,
+                      url: firstEv.url,
+                      doc_name: firstEv.doc_name,
+                      source_type: firstEv.source_type,
+                      snippet: firstEv.text
+                    });
+                  }
+                  setReadingAssistantOpen(false);
+                  setInspectorOpen(!inspectorOpen);
+                }}
+                className={`flex items-center gap-1.5 text-xs border px-3 py-1.5 rounded-xl transition-colors cursor-pointer ${
+                  inspectorOpen
+                    ? "bg-white/[0.08] text-white border-white/[0.14] font-medium"
+                    : "bg-white/[0.04] text-zinc-400 hover:text-zinc-200 border-white/[0.08]"
+                }`}
+                title={inspectorOpen ? "Hide Evidence Panel" : "Show Evidence Panel"}
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>Evidence ({sourceCount})</span>
+              </button>
+            )}
+
             {/* View Mode Switcher */}
             {status === "completed" && chapters.length > 1 && (
               <div className="flex items-center bg-[#12131a] border border-white/[0.08] p-1 rounded-xl">
@@ -665,23 +719,58 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
           </div>
         )}
 
+        {/* INITIAL LOADING STATE (Prevents flash of in-flight terminal on refresh) */}
+        {initialLoading && (
+          <div className="bg-[#12131a] border border-white/[0.08] rounded-2xl p-12 text-center space-y-4 max-w-xl mx-auto my-12 animate-in fade-in duration-150">
+            <div className="w-8 h-8 border-2 border-white/20 border-t-zinc-200 rounded-full animate-spin mx-auto" />
+            <div className="space-y-1">
+              <p className="text-sm font-medium text-zinc-200">Loading Research Dossier...</p>
+              <p className="text-xs text-zinc-500 font-mono">Retrieving verified evidence and citations</p>
+            </div>
+          </div>
+        )}
+
+        {/* NOT FOUND SCREEN */}
+        {!initialLoading && status === "not_found" && (
+          <div className="bg-[#12131a] border border-white/[0.08] rounded-2xl p-10 md:p-12 text-center space-y-4 max-w-xl mx-auto my-12">
+            <div className="w-12 h-12 rounded-xl bg-white/[0.05] border border-white/[0.1] flex items-center justify-center text-zinc-300 mx-auto">
+              <AlertTriangle className="w-6 h-6" />
+            </div>
+            <div className="space-y-1.5">
+              <h3 className="text-lg font-bold text-[#fafaf9]">Dossier Not Found</h3>
+              <p className="text-xs text-zinc-400 leading-relaxed">
+                The requested research dossier could not be located. It may have expired or been deleted.
+              </p>
+            </div>
+            <div className="pt-2">
+              <a
+                href="/studio"
+                className="px-4 py-2 bg-zinc-200 hover:bg-white text-zinc-900 text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 transition-colors cursor-pointer"
+              >
+                <span>Launch New Inquiry</span>
+                <ArrowUpRight className="w-3.5 h-3.5" />
+              </a>
+            </div>
+          </div>
+        )}
+
         {/* ─── ACTIVE INVESTIGATION RUNNING TERMINAL ────────────────── */}
-        {status !== "completed" && status !== "cancelled" && (
+        {!initialLoading && status !== "completed" && status !== "cancelled" && status !== "not_found" && (
           <div className="bg-[#12131a] border border-white/[0.08] rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl max-w-4xl mx-auto">
             {/* Header with Inquiry and In-Flight Controls */}
             <div className="flex flex-wrap items-start justify-between gap-4 pb-5 border-b border-white/[0.06]">
               <div className="space-y-1.5 max-w-2xl">
                 <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-white/[0.05] border border-white/[0.08] text-[11px] font-mono text-zinc-300">
                   <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 animate-pulse" />
-                  <span>Autonomous Investigation in Progress</span>
+                  <span>Research in progress • Web & Vault Retrieval</span>
                   <span className="text-zinc-600">•</span>
-                  <span className="text-zinc-400">4 Parallel Agents</span>
+                  <span className="text-zinc-400">Parallel Workers</span>
                 </div>
                 <h2 className="text-xl sm:text-2xl font-serif font-bold text-[#fafaf9] tracking-tight">
-                  {report?.query || "Synthesizing Research Inquiry..."}
+                  {report?.query || "Investigating research inquiry..."}
                 </h2>
                 <p className="text-xs text-zinc-400 font-mono flex items-center gap-2">
-                  <span>Phase:</span>
+                  <span className="text-zinc-500">Current Phase:</span>
                   <span className="text-zinc-200">{stage}</span>
                 </p>
               </div>
@@ -704,7 +793,7 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
                   className="px-3.5 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40"
                 >
                   <X className="w-3.5 h-3.5" />
-                  <span>{cancelling ? "Aborting..." : "Cancel"}</span>
+                  <span>{cancelling ? "Stopping..." : "Cancel"}</span>
                 </button>
               </div>
             </div>
@@ -722,48 +811,57 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
                   <Clock className="w-3.5 h-3.5 text-zinc-400" />
                   <span>Elapsed: {elapsedSec}s</span>
                 </span>
-                <span>{progress}% Synthesized</span>
+                <span>{progress}% Completed</span>
               </div>
             </div>
 
-            {/* Live Stream of Discovered Sources Feed */}
+            {/* Pipeline Stage Feed */}
             <div className="space-y-3 pt-2">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-semibold flex items-center gap-1.5">
                   <Activity className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Live Sources Stream</span>
+                  <span>Investigation Pipeline</span>
                 </span>
-                <span className="text-[10px] font-mono text-zinc-500">Autonomous Web & Vault Ingestion</span>
+                <span className="text-[10px] font-mono text-zinc-500">Live Agent Steps</span>
               </div>
 
-              <div className="bg-[#161822] border border-white/[0.06] rounded-xl p-3.5 space-y-2 font-mono text-xs max-h-56 overflow-y-auto">
+              <div className="bg-[#161822] border border-white/[0.06] rounded-xl p-4 space-y-2.5 font-mono text-xs">
                 <div className="flex items-center justify-between py-1 border-b border-white/[0.04] text-[11px]">
-                  <div className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
-                    <span className="text-zinc-300">Planner Agent: Orthogonal DAG query decomposition</span>
+                  <div className="flex items-center gap-2.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${progress >= 10 ? "bg-zinc-200" : "bg-zinc-600"}`} />
+                    <span className="text-zinc-200">1. Planning: Formulating search tracks & query decomposition</span>
                   </div>
-                  <span className="text-zinc-500 text-[10px]">Verified</span>
+                  <span className="text-zinc-400 text-[10px] font-semibold">{progress >= 35 ? "Completed" : "In Progress"}</span>
                 </div>
+
                 <div className="flex items-center justify-between py-1 border-b border-white/[0.04] text-[11px]">
-                  <div className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
-                    <span className="text-zinc-300">Retrieval Worker: Parallel academic & industry crawl</span>
+                  <div className="flex items-center gap-2.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${progress >= 35 ? "bg-zinc-200" : "bg-zinc-600"}`} />
+                    <span className="text-zinc-200">2. Retrieval: Crawling academic literature, filings & private vault</span>
                   </div>
-                  <span className="text-zinc-400 text-[10px]">{elapsedSec > 4 ? "Active" : "Pending"}</span>
+                  <span className="text-zinc-400 text-[10px] font-semibold">
+                    {progress >= 60 ? "Completed" : progress >= 35 ? "In Progress" : "Pending"}
+                  </span>
                 </div>
+
                 <div className="flex items-center justify-between py-1 border-b border-white/[0.04] text-[11px]">
-                  <div className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
-                    <span className="text-zinc-300">Normalizer: Canonical URI deduplication & citation index</span>
+                  <div className="flex items-center gap-2.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${progress >= 60 ? "bg-zinc-200" : "bg-zinc-600"}`} />
+                    <span className="text-zinc-200">3. Grounding: Deduplicating content & assembling evidence index</span>
                   </div>
-                  <span className="text-zinc-400 text-[10px]">{elapsedSec > 10 ? "Active" : "Queued"}</span>
+                  <span className="text-zinc-400 text-[10px] font-semibold">
+                    {progress >= 72 ? "Completed" : progress >= 60 ? "In Progress" : "Queued"}
+                  </span>
                 </div>
+
                 <div className="flex items-center justify-between py-1 text-[11px]">
-                  <div className="flex items-center gap-2">
-                    <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
-                    <span className="text-zinc-300">Critic & Synthesizer: Contradiction cross-check & monograph</span>
+                  <div className="flex items-center gap-2.5">
+                    <span className={`w-1.5 h-1.5 rounded-full ${progress >= 72 ? "bg-zinc-200" : "bg-zinc-600"}`} />
+                    <span className="text-zinc-200">4. Synthesis: Auditing contradictions & drafting research monograph</span>
                   </div>
-                  <span className="text-zinc-400 text-[10px]">{elapsedSec > 18 ? "Active" : "Queued"}</span>
+                  <span className="text-zinc-400 text-[10px] font-semibold">
+                    {progress >= 100 ? "Completed" : progress >= 72 ? "In Progress" : "Queued"}
+                  </span>
                 </div>
               </div>
             </div>
@@ -829,7 +927,9 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
                   <span>•</span>
                   <span>Dual Corpus (Web + Vault)</span>
                   <span>•</span>
-                  <span>4 min read</span>
+                  <span>
+                    {Math.max(1, Math.ceil(((report?.monograph || report?.report_markdown || "").trim().split(/\s+/).filter(Boolean).length || 800) / 220))} min read
+                  </span>
                 </div>
 
                 <div className="flex items-center gap-2">
@@ -848,7 +948,57 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
             {/* 3-PANE LAYOUT: Left TOC + Center Reading Canvas + Right Evidence Inspector */}
             <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
               
-              {/* LEFT RAIL: Reading TOC */}
+              {/* MOBILE TOC OVERLAY DRAWER */}
+              {!tocCollapsed && (
+                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md lg:hidden flex no-print animate-in fade-in duration-150">
+                  <div className="w-80 max-w-[85vw] bg-[#12131a] border-r border-white/[0.1] h-full p-5 space-y-4 overflow-y-auto shadow-2xl animate-in slide-in-from-left duration-200">
+                    <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
+                      <div className="space-y-0.5">
+                        <span className="text-[10px] font-mono text-zinc-400 uppercase font-semibold">
+                          Navigation
+                        </span>
+                        <h3 className="text-sm font-serif font-bold text-zinc-100">Table of Contents</h3>
+                      </div>
+                      <button
+                        type="button"
+                        onClick={() => setTocCollapsed(true)}
+                        className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] cursor-pointer transition-colors"
+                        title="Close Table of Contents"
+                      >
+                        <X className="w-4 h-4" />
+                      </button>
+                    </div>
+
+                    <nav className="space-y-1">
+                      {chapters.map((ch, idx) => (
+                        <button
+                          key={ch.id}
+                          type="button"
+                          onClick={() => {
+                            if (viewMode === "pager") {
+                              setActiveChapterIdx(idx);
+                            } else {
+                              const el = document.getElementById(ch.id);
+                              if (el) el.scrollIntoView({ behavior: "smooth" });
+                            }
+                            setTocCollapsed(true);
+                          }}
+                          className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors truncate block ${
+                            (viewMode === "pager" && activeChapterIdx === idx)
+                              ? "bg-white/[0.08] text-zinc-100 border border-white/[0.1] font-semibold"
+                              : "text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]"
+                          }`}
+                        >
+                          {ch.title}
+                        </button>
+                      ))}
+                    </nav>
+                  </div>
+                  <div className="flex-1" onClick={() => setTocCollapsed(true)} />
+                </div>
+              )}
+
+              {/* LEFT RAIL: Reading TOC (Desktop) */}
               {!tocCollapsed && (
                 <aside className="hidden lg:block lg:col-span-3 sticky top-24 space-y-4 no-print animate-in fade-in duration-150">
                   <div className="bg-[#12131a] border border-white/[0.08] rounded-xl p-4 space-y-3">
@@ -947,10 +1097,10 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
                 <div className="bg-[#12131a] border border-white/[0.08] rounded-xl p-5 sm:p-7 space-y-4 shadow-xl no-print">
                   <div className="space-y-1">
                     <span className="text-[11px] font-mono text-zinc-400 uppercase font-semibold">
-                      Author Monograph Addendum
+                      Follow-Up Investigation
                     </span>
                     <h3 className="text-base font-serif font-bold text-[#fafaf9]">
-                      Investigate a follow-up angle
+                      Explore a specific follow-up angle
                     </h3>
                   </div>
 
@@ -965,7 +1115,7 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
                       type="text"
                       value={addendumInquiry}
                       onChange={(e) => setAddendumInquiry(e.target.value)}
-                      placeholder="e.g. Compare cold-weather degradation curves under -20°C..."
+                      placeholder="e.g. Compare real-world degradation under extreme winter conditions..."
                       className="flex-1 bg-[#161822] border border-white/[0.08] focus:border-white/[0.22] rounded-lg px-4 py-2 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none font-sans"
                     />
                     <button
@@ -976,11 +1126,11 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
                       {addendumLoading ? (
                         <>
                           <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Synthesizing...</span>
+                          <span>Investigating...</span>
                         </>
                       ) : (
                         <>
-                          <span>Append Addendum</span>
+                          <span>Investigate</span>
                           <Send className="w-3.5 h-3.5" />
                         </>
                       )}
@@ -991,7 +1141,7 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
                   {report?.suggested_inquiries?.length > 0 && (
                     <div className="pt-2 border-t border-white/[0.05] space-y-1.5">
                       <span className="text-[10px] font-mono text-zinc-500 uppercase">
-                        Suggested Angles from Critic Audit:
+                        Suggested exploration angles:
                       </span>
                       <div className="flex flex-wrap gap-1.5">
                         {report.suggested_inquiries.map((chip: string, i: number) => (
@@ -1133,17 +1283,24 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
                             disabled={highlightLoading || !highlightQuestion.trim()}
                             className="p-1.5 bg-zinc-200 hover:bg-white text-zinc-900 disabled:opacity-40 rounded-lg cursor-pointer shrink-0"
                           >
-                            <Send className="w-3.5 h-3.5" />
+                            {highlightLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
                           </button>
                         </div>
                       </form>
 
-                      {highlightAnswer && (
+                      {highlightLoading && (
+                        <div className="bg-white/[0.04] border border-white/[0.08] p-3 rounded-lg text-xs text-zinc-300 flex items-center gap-2">
+                          <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                          <span>Interrogating passage and evidence...</span>
+                        </div>
+                      )}
+
+                      {highlightAnswer && !highlightLoading && (
                         <div className="bg-white/[0.04] border border-white/[0.08] p-3 rounded-lg text-xs text-zinc-200 space-y-1">
                           <span className="text-[10px] font-mono text-zinc-400 font-semibold block uppercase">
                             Explanation:
                           </span>
-                          <p className="leading-relaxed">{highlightAnswer}</p>
+                          <p className="leading-relaxed whitespace-pre-line">{highlightAnswer}</p>
                         </div>
                       )}
                     </div>
@@ -1158,6 +1315,11 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
       {/* FLOATING TEXT SELECTION TOOLBAR */}
       {floatingMenu && (
         <div
+          ref={floatingMenuRef}
+          onMouseDown={(e) => {
+            e.preventDefault();
+            e.stopPropagation();
+          }}
           className="fixed z-50 transform -translate-x-1/2 no-print flex items-center gap-1.5 p-1 rounded-full bg-[#161822] border border-white/[0.14] shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150"
           style={{ left: floatingMenu.x, top: floatingMenu.y }}
         >
@@ -1195,6 +1357,19 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
             <span>Ask...</span>
           </button>
         </div>
+      )}
+
+      {/* FLOATING RESTORE TOC BUTTON */}
+      {status === "completed" && chapters.length > 0 && tocCollapsed && (
+        <button
+          type="button"
+          onClick={() => setTocCollapsed(false)}
+          className="fixed bottom-6 left-6 z-40 px-3.5 py-2 rounded-full bg-[#161822] border border-white/[0.14] text-xs text-zinc-300 hover:text-white shadow-2xl flex items-center gap-2 backdrop-blur-xl transition-all cursor-pointer hover:border-white/30 animate-in fade-in zoom-in-95 duration-150 no-print"
+          title="Open Table of Contents"
+        >
+          <PanelLeftOpen className="w-3.5 h-3.5 text-zinc-400" />
+          <span>Table of Contents</span>
+        </button>
       )}
     </div>
   );

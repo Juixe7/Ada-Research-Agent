@@ -2,7 +2,7 @@
 
 import { useState } from "react";
 import { useRouter } from "next/navigation";
-import { ArrowRight, AlertCircle, Loader2 } from "lucide-react";
+import { ArrowRight, ArrowLeft, AlertCircle, Loader2 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { useAuth } from "@/context/AuthContext";
 import AdaPrismLogo from "@/components/AdaPrismLogo";
@@ -38,6 +38,16 @@ export default function LoginPage() {
 
       <main className="flex-1 flex items-center justify-center px-4 py-16">
         <div className="w-full max-w-sm space-y-6">
+          <div className="flex items-center justify-start">
+            <a
+              href="/"
+              className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-zinc-200 transition-colors"
+            >
+              <ArrowLeft className="w-3.5 h-3.5" />
+              <span>Back to home</span>
+            </a>
+          </div>
+
           <div className="flex flex-col items-center text-center space-y-3">
             <AdaPrismLogo size="md" showWordmark={false} />
             <div className="space-y-1">
@@ -79,6 +89,12 @@ export default function LoginPage() {
                   <label className="text-xs font-medium text-zinc-300">
                     Password
                   </label>
+                  <a
+                    href="/forgot-password"
+                    className="text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors"
+                  >
+                    Forgot password?
+                  </a>
                 </div>
                 <input
                   type="password"

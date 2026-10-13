@@ -20,7 +20,7 @@ from engine.auth import auth_router, get_current_user, get_optional_user
 from engine.models import User, ResearchSession, ResearchTurn, VaultDocument
 from engine.sessions import sessions_router
 from engine.agents.evidence_delta import condense_session_turns, format_delta_planning_context
-from engine.agents.llm_resilient import call_resilient_llm
+from engine.agents.llm_resilient import call_resilient_llm, get_last_llm_error
 
 # Initialize database schema
 init_db()
@@ -130,9 +130,13 @@ class QuerySelectionRequest(BaseModel):
     question: str
 
 
-class SubInvestigationRequest(BaseModel):
-    selected_text: str
+class AddendumRequest(BaseModel):
     inquiry: str
+    selected_text: Optional[str] = ""
+    context: Optional[str] = ""
+
+
+SubInvestigationRequest = AddendumRequest
 
 
 class QuerySourceRequest(BaseModel):
@@ -459,11 +463,13 @@ def query_selection(report_id: str, req: QuerySelectionRequest):
     }
 
 
+@app.post("/api/report/{report_id}/addendum")
 @app.post("/api/report/{report_id}/sub-investigation")
-def dispatch_sub_investigation(report_id: str, req: SubInvestigationRequest):
+def dispatch_sub_investigation(report_id: str, req: AddendumRequest):
     """
-    Fans out a focused sub-agent task on highlighted text, runs web retrieval,
-    synthesizes a new Addendum via resilient multi-tier LLM, and appends it to the dossier.
+    Fans out a focused sub-agent task on highlighted text or follow-up inquiry,
+    runs web retrieval, synthesizes a new Addendum via resilient multi-tier LLM,
+    and appends it to the dossier.
     """
     clean_id = sanitize_report_id(report_id)
     json_path = DOSSIER_DIR / f"dossier_{clean_id}.json"
@@ -483,8 +489,12 @@ def dispatch_sub_investigation(report_id: str, req: SubInvestigationRequest):
         "category": "follow_up_deep_dive"
     }
 
-    sub_res = execute_sub_research(sub_task, include_user_docs=True, max_pages_to_scrape=2)
-    new_evidence = sub_res.get("evidence", [])
+    try:
+        sub_res = execute_sub_research(sub_task, include_user_docs=True, max_pages_to_scrape=2)
+        new_evidence = sub_res.get("evidence", [])
+    except Exception as scrape_err:
+        print(f"[addendum] Sub-research retrieval warning: {scrape_err}")
+        new_evidence = []
 
     evidence_text = "\n\n".join(
         [f"[{ev.get('source_id')}] {ev.get('title')}: {ev.get('text', '')[:400]}" for ev in new_evidence[:5]]
@@ -494,8 +504,9 @@ def dispatch_sub_investigation(report_id: str, req: SubInvestigationRequest):
         "highlighted from an earlier research report. Synthesize a concise 2-3 paragraph Addendum section "
         "with technical detail and inline citations [Sx] / [Dx] based on the newly gathered evidence."
     )
+    context_text = (req.selected_text or req.context or dossier.get("query", "")).strip()
     user_prompt = (
-        f"CONTEXT FROM PREVIOUS REPORT:\n\"{req.selected_text}\"\n\n"
+        f"CONTEXT FROM PREVIOUS REPORT:\n\"{context_text[:1000]}\"\n\n"
         f"FOLLOW-UP INQUIRY:\n\"{req.inquiry}\"\n\n"
         f"NEW EVIDENCE GATHERED:\n{evidence_text}\n\n"
         f"Synthesize an authoritative 'Addendum Section'."
@@ -509,15 +520,34 @@ def dispatch_sub_investigation(report_id: str, req: SubInvestigationRequest):
         json_mode=False
     )
     if not addendum_content:
-        addendum_content = f"Follow-up investigation collected {len(new_evidence)} additional sources addressing: {req.inquiry}."
+        last_err = get_last_llm_error() or ""
+        if "429" in last_err or "rate" in last_err.lower() or "quota" in last_err.lower():
+            raise HTTPException(
+                status_code=429,
+                detail="AI provider rate limit reached (Groq/Gemini). Please wait 30 seconds before retrying."
+            )
+        if new_evidence:
+            addendum_content = f"Follow-up investigation collected {len(new_evidence)} additional sources addressing: {req.inquiry}."
+        else:
+            raise HTTPException(
+                status_code=502,
+                detail="Unable to synthesize Addendum due to upstream AI service interruption. Please retry."
+            )
+
+    highlight_note = (
+        f'> *Sub-Investigation triggered from highlighted text: "{req.selected_text[:120]}..."*\n\n'
+        if req.selected_text
+        else f'> *Follow-up investigation on: "{req.inquiry}"*\n\n'
+    )
 
     formatted_addendum = (
         f"\n\n---\n\n## Addendum: {req.inquiry}\n\n"
-        f"> *Sub-Investigation triggered from highlighted text: \"{req.selected_text[:120]}...\"*\n\n"
+        f"{highlight_note}"
         f"{addendum_content}"
     )
 
     dossier["report_markdown"] = dossier.get("report_markdown", "") + formatted_addendum
+    dossier["monograph"] = dossier["report_markdown"]
     existing_manifest = dossier.setdefault("evidence_manifest", [])
     existing_manifest.extend(new_evidence)
 
@@ -533,7 +563,8 @@ def dispatch_sub_investigation(report_id: str, req: SubInvestigationRequest):
         "inquiry": req.inquiry,
         "addendum_markdown": formatted_addendum,
         "new_sources_count": len(new_evidence),
-        "updated_report_markdown": dossier["report_markdown"]
+        "updated_report_markdown": dossier["report_markdown"],
+        "monograph": dossier["monograph"]
     }
 
 

@@ -2,14 +2,14 @@
 
 import React, { useState, useEffect } from "react";
 import {
-  AlertTriangle,
   FileText,
   Globe,
   Sliders,
   ArrowRight,
   X,
   RefreshCw,
-  Check
+  Check,
+  Compass
 } from "lucide-react";
 
 interface PreflightModalProps {
@@ -93,21 +93,29 @@ export default function PreflightModal({
   const hasAmbiguity = Boolean(blueprint.ambiguity_detected);
   const sources = blueprint.ambiguity_sources || {};
 
+  const formatScopeLabel = (scope: string) => {
+    if (!scope) return "Web + Vault";
+    const s = scope.toLowerCase();
+    if (s.includes("combined") || s.includes("dual")) return "Web + Vault";
+    if (s.includes("vault") || s.includes("user_doc")) return "Private Vault";
+    return "Public Web";
+  };
+
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
       <div className="bg-[#12131a] border border-white/[0.1] w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh]">
         
         {/* Header */}
-        <div className="p-5 border-b border-white/[0.08] flex items-start justify-between gap-4">
-          <div className="space-y-1 min-w-0">
+        <div className="p-6 border-b border-white/[0.08] flex items-start justify-between gap-4 bg-[#141620]">
+          <div className="space-y-1.5 min-w-0">
             <div className="inline-flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-zinc-400">
-              <Sliders className="w-3.5 h-3.5" />
-              <span>Scope Calibration</span>
+              <Compass className="w-3.5 h-3.5 text-zinc-300" />
+              <span>Research Blueprint</span>
               <span className="text-zinc-600">•</span>
-              <span className="text-zinc-400">~{blueprint.estimated_duration_seconds || 35}s execution</span>
+              <span className="text-zinc-400">Estimated ~30s</span>
             </div>
-            <h2 className="text-lg font-serif font-bold text-[#fafaf9] tracking-tight">
-              Calibrate Research Intent
+            <h2 className="text-xl font-serif font-bold text-[#fafaf9] tracking-tight">
+              Review Investigation Plan
             </h2>
             <p className="text-xs text-zinc-400 truncate italic font-serif">
               &ldquo;{query}&rdquo;
@@ -124,27 +132,30 @@ export default function PreflightModal({
         </div>
 
         {/* Content Body */}
-        <div className="p-5 space-y-6 overflow-y-auto">
+        <div className="p-6 space-y-6 overflow-y-auto">
           
-          {/* Ambiguity Diagnosis */}
+          {/* Ambiguity / Multi-Context Diagnosis */}
           {hasAmbiguity ? (
-            <div className="space-y-3 p-4 rounded-xl bg-white/[0.03] border border-white/[0.08]">
-              <div className="flex items-center gap-2 text-zinc-300 font-semibold text-xs font-mono uppercase tracking-wider">
-                <AlertTriangle className="w-3.5 h-3.5 shrink-0 text-zinc-400" />
-                <span>Entity Ambiguity Detected</span>
+            <div className="space-y-3.5 p-4 rounded-xl bg-white/[0.03] border border-white/[0.08]">
+              <div className="space-y-1">
+                <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider font-semibold">
+                  Context Guidance
+                </span>
+                <h4 className="text-xs font-semibold text-zinc-200">
+                  Multiple perspectives identified for this topic
+                </h4>
+                <p className="text-xs text-zinc-400 leading-relaxed">
+                  {blueprint.ambiguity_explanation}
+                </p>
               </div>
-
-              <p className="text-xs text-zinc-300 leading-relaxed">
-                {blueprint.ambiguity_explanation}
-              </p>
 
               {/* Source Origin Comparison */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                 {sources.vault && (
                   <div className="bg-[#161822] p-3 rounded-lg border border-white/[0.08] space-y-1">
-                    <span className="text-[10px] font-mono text-zinc-300 font-medium flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono text-zinc-400 font-medium flex items-center gap-1.5">
                       <FileText className="w-3 h-3 text-zinc-400" />
-                      <span>Private Knowledge Vault</span>
+                      <span>From Private Vault</span>
                     </span>
                     <p className="text-xs font-semibold text-[#fafaf9] truncate">{sources.vault.doc_name}</p>
                     <p className="text-[11px] text-zinc-400 line-clamp-2 italic">
@@ -155,9 +166,9 @@ export default function PreflightModal({
 
                 {sources.web && (
                   <div className="bg-[#161822] p-3 rounded-lg border border-white/[0.08] space-y-1">
-                    <span className="text-[10px] font-mono text-zinc-300 font-medium flex items-center gap-1.5">
+                    <span className="text-[10px] font-mono text-zinc-400 font-medium flex items-center gap-1.5">
                       <Globe className="w-3 h-3 text-zinc-400" />
-                      <span>Public Commercial Web</span>
+                      <span>From Public Web</span>
                     </span>
                     <p className="text-xs font-semibold text-[#fafaf9] truncate">{sources.web.entity}</p>
                     <p className="text-[11px] text-zinc-400 line-clamp-2 italic">
@@ -169,9 +180,9 @@ export default function PreflightModal({
 
               {/* Clarification Choice Selector */}
               {blueprint.clarification_options?.length > 0 && (
-                <div className="space-y-1.5 pt-2">
+                <div className="space-y-2 pt-2 border-t border-white/[0.06]">
                   <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block font-semibold">
-                    Select Investigation Focus:
+                    Choose primary direction:
                   </span>
                   <div className="space-y-1.5">
                     {blueprint.clarification_options.map((opt: any) => (
@@ -184,7 +195,7 @@ export default function PreflightModal({
                         className={`flex items-start gap-3 p-3 rounded-xl border text-xs cursor-pointer transition-all ${
                           selectedClarification === opt.id && !showCustomInput
                             ? "bg-white/[0.08] border-white/[0.2] text-[#fafaf9]"
-                            : "bg-[#161822] border-white/[0.06] text-zinc-400 hover:text-zinc-200"
+                            : "bg-[#161822] border-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:border-white/[0.12]"
                         }`}
                       >
                         <input
@@ -208,29 +219,28 @@ export default function PreflightModal({
 
           {/* Research Angles */}
           {blueprint.research_angles?.length > 0 && (
-            <div className="space-y-2">
+            <div className="space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-semibold">
-                  Investigation Angles ({activeAngles.length} selected):
+                  Angles to Explore ({activeAngles.length} of {blueprint.research_angles.length} active)
                 </span>
-                <span className="text-[10px] text-zinc-500">Click to toggle angle</span>
               </div>
 
-              <div className="space-y-1.5">
+              <div className="space-y-2">
                 {blueprint.research_angles.map((angle: any) => {
                   const isChecked = activeAngles.includes(angle.title);
                   return (
                     <div
                       key={angle.id}
                       onClick={() => toggleAngle(angle.title)}
-                      className={`flex items-center justify-between p-3 rounded-xl border text-xs cursor-pointer transition-all ${
+                      className={`flex items-center justify-between p-3.5 rounded-xl border text-xs cursor-pointer transition-all ${
                         isChecked
-                          ? "bg-white/[0.04] border-white/[0.1] text-zinc-100"
-                          : "bg-black/20 border-white/[0.03] text-zinc-500 line-through"
+                          ? "bg-[#161822] border-white/[0.12] text-zinc-100 shadow-sm"
+                          : "bg-black/20 border-white/[0.04] text-zinc-500 opacity-60"
                       }`}
                     >
-                      <div className="flex items-center gap-2.5 min-w-0 flex-1">
-                        <div className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] ${
+                      <div className="flex items-center gap-3 min-w-0 flex-1">
+                        <div className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] shrink-0 transition-colors ${
                           isChecked ? "bg-zinc-200 border-zinc-200 text-zinc-950 font-bold" : "border-zinc-700 bg-zinc-900"
                         }`}>
                           {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
@@ -241,8 +251,8 @@ export default function PreflightModal({
                         </div>
                       </div>
 
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.04] text-zinc-400 border border-white/[0.06] shrink-0 ml-3">
-                        {angle.source_scope || "Combined"}
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.05] text-zinc-400 border border-white/[0.08] shrink-0 ml-3">
+                        {formatScopeLabel(angle.source_scope)}
                       </span>
                     </div>
                   );
@@ -251,28 +261,28 @@ export default function PreflightModal({
             </div>
           )}
 
-          {/* User Prompt Tweak Input */}
-          <form onSubmit={handleTweakSubmit} className="space-y-1.5 pt-1">
+          {/* User Guidance / Constraint Input */}
+          <form onSubmit={handleTweakSubmit} className="space-y-2 pt-1">
             <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 block font-semibold">
-              Modify or Tweak Plan (Optional):
+              Add specific guidance or constraints:
             </span>
             <div className="flex gap-2">
               <input
                 type="text"
                 value={userPromptTweak}
                 onChange={(e) => setUserPromptTweak(e.target.value)}
-                placeholder="e.g. Focus only on commercial yields, ignore theoretical models..."
-                className="flex-1 bg-[#161822] border border-white/[0.08] focus:border-white/[0.22] rounded-lg px-3.5 py-2 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none font-sans"
+                placeholder="e.g. Prioritize commercial viability and market readiness over theory..."
+                className="flex-1 bg-[#161822] border border-white/[0.08] focus:border-white/[0.22] rounded-lg px-3.5 py-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none font-sans"
               />
               <button
                 type="submit"
                 disabled={!userPromptTweak.trim() || recalibrating}
-                className="px-3.5 py-2 bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-40 text-xs font-medium text-zinc-200 rounded-lg border border-white/[0.08] transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+                className="px-4 py-2.5 bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-40 text-xs font-medium text-zinc-200 rounded-lg border border-white/[0.08] transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
               >
                 {recalibrating ? (
-                  <RefreshCw className="w-3 h-3 animate-spin text-zinc-400" />
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-zinc-400" />
                 ) : (
-                  <span>Re-Plan</span>
+                  <span>Update Plan</span>
                 )}
               </button>
             </div>
@@ -280,13 +290,13 @@ export default function PreflightModal({
         </div>
 
         {/* Modal Footer Actions */}
-        <div className="p-4 border-t border-white/[0.08] flex items-center justify-between gap-3 bg-[#0d0e14]">
+        <div className="p-4 sm:p-5 border-t border-white/[0.08] flex items-center justify-between gap-3 bg-[#0d0e14]">
           <button
             type="button"
             onClick={onSkip}
             className="text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
           >
-            Skip Calibration
+            Skip review, start now
           </button>
 
           <div className="flex items-center gap-2">
@@ -302,7 +312,7 @@ export default function PreflightModal({
               onClick={handleLaunch}
               className="px-5 py-2 bg-zinc-200 hover:bg-white text-zinc-950 font-semibold rounded-lg text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
             >
-              <span>Launch Investigation</span>
+              <span>Start Research</span>
               <ArrowRight className="w-3.5 h-3.5" />
             </button>
           </div>
