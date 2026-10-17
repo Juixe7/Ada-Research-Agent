@@ -1,3 +1,7 @@
+"""SQLAlchemy entities for accounts, research sessions, normalized runs, evidence, reports, and telemetry.
+
+"""
+
 import uuid
 from datetime import datetime, timezone
 from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, JSON
@@ -5,11 +9,13 @@ from sqlalchemy.orm import relationship
 from engine.database import Base
 
 def generate_uuid() -> str:
+    """Generate a UUID4 string for a new database entity."""
     return str(uuid.uuid4())
 
 # ── User & Auth Models (Preserved) ───────────────────────────
 
 class User(Base):
+    """Account credentials and profile metadata."""
     __tablename__ = "users"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -27,6 +33,7 @@ class User(Base):
 
 
 class ResearchSession(Base):
+    """An owner-scoped sequence of related research turns."""
     __tablename__ = "research_sessions"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -40,6 +47,7 @@ class ResearchSession(Base):
 
 
 class ResearchTurn(Base):
+    """One question/result lifecycle entry within a research session."""
     __tablename__ = "research_turns"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -59,6 +67,7 @@ class ResearchTurn(Base):
 
 
 class VaultDocument(Base):
+    """Metadata for a user-owned uploaded or pasted source document."""
     __tablename__ = "vault_documents"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -72,6 +81,7 @@ class VaultDocument(Base):
 
 
 class PasswordResetToken(Base):
+    """Hashed one-time password reset token and expiry."""
     __tablename__ = "password_reset_tokens"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -86,6 +96,7 @@ class PasswordResetToken(Base):
 # ── Blueprint Section 10: Relational Research Data Model ─────
 
 class Workspace(Base):
+    """Owner-scoped container for normalized runs."""
     __tablename__ = "workspaces"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -98,6 +109,7 @@ class Workspace(Base):
 
 
 class Run(Base):
+    """Normalized research-run lifecycle and configuration record."""
     __tablename__ = "runs"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -139,6 +151,7 @@ class Run(Base):
 
 
 class Track(Base):
+    """Sub-question execution metadata for one run."""
     __tablename__ = "tracks"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -153,6 +166,7 @@ class Track(Base):
 
 
 class Source(Base):
+    """A web or private-document source referenced by evidence."""
     __tablename__ = "sources"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -174,6 +188,7 @@ class Source(Base):
 
 
 class Evidence(Base):
+    """A retrieved passage linked to its source and research track."""
     __tablename__ = "evidence"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -193,6 +208,7 @@ class Evidence(Base):
 
 
 class Finding(Base):
+    """Critic finding about coverage, contradiction, or evidence quality."""
     __tablename__ = "findings"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -209,6 +225,7 @@ class Finding(Base):
 
 
 class Report(Base):
+    """Persisted report metadata and generated content reference."""
     __tablename__ = "reports"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -223,6 +240,7 @@ class Report(Base):
 
 
 class Claim(Base):
+    """A report claim and its evidence-support assessment."""
     __tablename__ = "claims"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -237,6 +255,7 @@ class Claim(Base):
 
 
 class Score(Base):
+    """Run quality/evaluation metric record."""
     __tablename__ = "scores"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -251,6 +270,7 @@ class Score(Base):
 
 
 class Memory(Base):
+    """Condensed prior-session context used for follow-up planning."""
     __tablename__ = "memories"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -262,6 +282,7 @@ class Memory(Base):
 
 
 class LLMCall(Base):
+    """Per-model-call usage, latency, cost, and trace metadata."""
     __tablename__ = "llm_calls"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)
@@ -280,6 +301,7 @@ class LLMCall(Base):
 
 
 class Event(Base):
+    """Sequenced lifecycle event persisted for run replay."""
     __tablename__ = "events"
 
     id = Column(String(36), primary_key=True, default=generate_uuid)

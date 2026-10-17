@@ -1,3 +1,7 @@
+"""State-transforming LangGraph nodes for research, review, synthesis, validation, and finalization.
+
+"""
+
 import os
 import concurrent.futures
 import hashlib

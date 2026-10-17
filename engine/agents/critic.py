@@ -1,3 +1,7 @@
+"""Evidence coverage and contradiction review for a research run.
+
+"""
+
 import json
 import re
 from typing import List, Dict, Any, Optional

@@ -1,3 +1,7 @@
+"""Shared resilient LLM gateway access and provider error reporting for agents.
+
+"""
+
 import time
 import json
 import threading
@@ -22,7 +26,13 @@ from packages.llm_gateway import (
     ResponseCache
 )
 
-def _get_redis_safe():
+def _get_redis_safe() -> Optional[Any]:
+    """Connect to Redis for shared limits/cache, or return `None` on failure.
+
+    Failure behavior:
+        Connection/import errors are intentionally swallowed so the gateway can
+        continue with process-local limiter/cache behavior.
+    """
     try:
         import redis
         client = redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=1.0, socket_timeout=1.0)
@@ -75,7 +85,26 @@ def call_gateway(
     run_id: Optional[str] = None,
     agent_name: Optional[str] = None
 ) -> LLMResult:
-    """Invokes the LiteLLM Gateway and returns the complete LLMResult with telemetry."""
+    """Invoke the configured gateway, enforce run budgets, and record telemetry.
+
+    Args:
+        group: Model group used to select primary/fallback providers.
+        messages: LiteLLM-compatible messages.
+        schema: Optional structured response schema.
+        temperature: Sampling temperature.
+        max_tokens: Maximum completion tokens.
+        json_mode: Request JSON-formatted output.
+        timeout: Provider call timeout in seconds.
+        run_id: Optional run used for budget checks, persistence and events.
+        agent_name: Optional trace/audit label.
+
+    Returns:
+        Full gateway result, including usage, error, degradation and cache data.
+
+    Failure behavior:
+        Budget-query and telemetry-persistence exceptions are logged and do not
+        block the model call/result. Gateway/limiter exceptions may propagate.
+    """
     global LAST_LLM_ERROR
     gateway = get_default_gateway()
     result = None
@@ -154,8 +183,21 @@ def call_resilient_llm(
     agent_name: Optional[str] = None,
 ) -> Optional[str]:
     """
-    Backward-compatible facade over the LiteLLM Gateway.
-    Automatically handles rate-limiting, failovers (Groq -> Gemini), and caching.
+    Backward-compatible text-only facade over the shared LLM gateway.
+
+    Args:
+        system_prompt: Instruction message for the model.
+        user_prompt: User/task content supplied to the model.
+        temperature: Sampling temperature.
+        max_tokens: Completion token limit.
+        json_mode: Request JSON output when true.
+        group: Model group to route through.
+        schema: Optional structured response schema.
+        run_id: Optional research run for budgets and telemetry.
+        agent_name: Optional agent label for traces/events.
+
+    Returns:
+        Stripped model content, or `None` if all provider attempts fail.
     """
     messages = [
         {"role": "system", "content": system_prompt},

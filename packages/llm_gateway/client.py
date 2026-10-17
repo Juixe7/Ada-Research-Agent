@@ -1,3 +1,7 @@
+"""LiteLLM completion gateway with model groups, failover, rate limiting, caching, parsing, and optional Langfuse tracing.
+
+"""
+
 import time
 import json
 import re
@@ -73,6 +77,16 @@ class LLMClient:
         limiter: Optional[TokenBucketLimiter] = None,
         cache: Optional[ResponseCache] = None,
     ):
+        """Create a gateway with injectable routing, quota, and cache policies.
+
+        Args:
+            model_groups: Group-to-primary/fallback model configuration. Defaults
+                to the provider groups declared in this module.
+            limiter: Shared request/token limiter; a default limiter is created
+                when omitted.
+            cache: Deterministic completion cache; a default cache is created
+                when omitted.
+        """
         self.groups = model_groups or DEFAULT_MODEL_GROUPS
         self.limiter = limiter or TokenBucketLimiter()
         self.cache = cache or ResponseCache()
@@ -90,6 +104,28 @@ class LLMClient:
         run_id: Optional[str] = None,
         agent_name: Optional[str] = None
     ) -> LLMResult:
+        """Run a completion with cache, primary/fallback, and schema-repair logic.
+
+        Args:
+            group: Configured model purpose (`small`, `large`, `write`, `judge`).
+            messages: Chat messages in LiteLLM's role/content format.
+            schema: Optional Pydantic model used to parse and repair JSON output.
+            temperature: Sampling temperature; cache policy may restrict use.
+            max_tokens: Provider output-token limit.
+            json_mode: Request JSON mode even without a schema.
+            timeout: Per-provider-call timeout in seconds.
+            run_id: Optional research run ID used for trace correlation.
+            agent_name: Optional agent label attached to traces.
+
+        Returns:
+            `LLMResult` containing content, usage, model, degraded state and any
+            terminal provider error. Cache hits return zero measured usage.
+
+        Failure behavior:
+            Provider failures are returned in the result after fallback attempts.
+            Limiter and unexpected local runtime errors may propagate; schema
+            parse/repair failure leaves `parsed` unset without discarding content.
+        """
         group_config = self.groups.get(group) or self.groups.get("small") or next(iter(self.groups.values()))
         primary_model = group_config["primary"]
         fallback_model = group_config.get("fallback")

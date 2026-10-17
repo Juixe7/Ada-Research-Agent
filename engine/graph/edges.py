@@ -1,3 +1,7 @@
+"""Conditional LangGraph routing decisions for research and critique stages.
+
+"""
+
 from engine.graph.state import RunState
 from engine.celery_app import get_job_state
 

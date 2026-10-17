@@ -1,3 +1,7 @@
+"""Exports research reports into downloadable document formats.
+
+"""
+
 import os
 import re
 import json

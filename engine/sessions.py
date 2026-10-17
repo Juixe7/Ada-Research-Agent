@@ -1,3 +1,7 @@
+"""Authenticated research-session and turn listing, mutation, sharing, and export endpoints.
+
+"""
+
 import json
 from pathlib import Path
 from datetime import datetime, timezone
@@ -16,17 +20,29 @@ sessions_router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 DOSSIER_DIR = Path("dossiers")
 
 class CreateSessionRequest(BaseModel):
+    """Validated title for a new research session."""
     title: str = Field(..., min_length=1, max_length=255)
 
 class UpdateSessionRequest(BaseModel):
+    """Validated replacement title for a research session."""
     title: str = Field(..., min_length=1, max_length=255)
 
 @sessions_router.get("")
 def list_user_sessions(
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
-):
-    """Returns all research sessions for the authenticated user."""
+) -> Dict[str, Any]:
+    """List the owner's sessions with current turn status.
+
+    Args:
+        user: Authenticated session owner.
+        db: Request-scoped database session.
+
+    Returns:
+        A `sessions` array containing each thread's title, turn count, latest
+        query/status and timestamps. Missing completed artifacts are reported
+        as failed rather than completed.
+    """
     sessions = (
         db.query(ResearchSession)
         .filter(ResearchSession.user_id == user.id)
@@ -63,8 +79,17 @@ def create_session(
     req: CreateSessionRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
-):
-    """Creates a new named research session thread."""
+) -> Dict[str, Any]:
+    """Create an empty named research thread for the authenticated owner.
+
+    Args:
+        req: Validated session title.
+        user: Authenticated owner.
+        db: Request-scoped database session.
+
+    Returns:
+        New session ID, normalized title, and creation time.
+    """
     session = ResearchSession(
         user_id=user.id,
         title=req.title.strip()
@@ -83,8 +108,20 @@ def get_session_details(
     session_id: str,
     user: Optional[User] = Depends(get_optional_user),
     db: Session = Depends(get_db)
-):
-    """Retrieves session details and all associated research turns."""
+) -> Dict[str, Any]:
+    """Read session metadata and turns, filtering shared views to public turns.
+
+    Args:
+        session_id: Session identifier.
+        user: Optional bearer user; only the owner sees private turns/title.
+        db: Request-scoped database session.
+
+    Returns:
+        Session metadata and ordered turn summaries.
+
+    Raises:
+        HTTPException: 404 for missing or non-public sessions not owned by user.
+    """
     session = db.query(ResearchSession).filter(ResearchSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Research session not found.")
@@ -150,8 +187,21 @@ def update_session(
     req: UpdateSessionRequest,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
-):
-    """Updates the title of a research session."""
+) -> Dict[str, Any]:
+    """Update a session title after checking ownership.
+
+    Args:
+        session_id: Session identifier.
+        req: Validated replacement title.
+        user: Authenticated owner.
+        db: Request-scoped database session.
+
+    Returns:
+        Update status, identifier, and saved title.
+
+    Raises:
+        HTTPException: 404 when the session is missing or not owned by user.
+    """
     session = db.query(ResearchSession).filter(
         ResearchSession.id == session_id,
         ResearchSession.user_id == user.id
@@ -169,8 +219,21 @@ def delete_session(
     session_id: str,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
-):
-    """Deletes an entire research session and all of its turns."""
+) -> Dict[str, str]:
+    """Delete an owner's session, turns, and referenced local report files.
+
+    Args:
+        session_id: Session identifier.
+        user: Authenticated owner.
+        db: Request-scoped database session.
+
+    Returns:
+        Success status and message.
+
+    Raises:
+        HTTPException: 404 when missing or not owned by user. Filesystem/DB
+        errors propagate; this operation does not remove vector vault files.
+    """
     session = db.query(ResearchSession).filter(
         ResearchSession.id == session_id,
         ResearchSession.user_id == user.id
@@ -199,8 +262,21 @@ def delete_session_turn(
     turn_id: str,
     user: User = Depends(get_current_user),
     db: Session = Depends(get_db)
-):
-    """Deletes a specific turn from a research session."""
+) -> Dict[str, str]:
+    """Delete one turn and its local report files from an owned session.
+
+    Args:
+        session_id: Parent session identifier.
+        turn_id: Turn/report identifier.
+        user: Authenticated owner.
+        db: Request-scoped database session.
+
+    Returns:
+        Success status and message.
+
+    Raises:
+        HTTPException: 404 when parent session or requested turn is unavailable.
+    """
     session = db.query(ResearchSession).filter(
         ResearchSession.id == session_id,
         ResearchSession.user_id == user.id
@@ -232,8 +308,20 @@ def export_compiled_session(
     session_id: str,
     user: Optional[User] = Depends(get_optional_user),
     db: Session = Depends(get_db)
-):
-    """Compiles all completed turns in a session into a single executive research monograph."""
+) -> Dict[str, Any]:
+    """Compile visible session turns into a combined Markdown document.
+
+    Args:
+        session_id: Session identifier.
+        user: Optional bearer user; unauthenticated callers see only public turns.
+        db: Request-scoped database session.
+
+    Returns:
+        Session ID, visible title, and concatenated Markdown.
+
+    Raises:
+        HTTPException: 404 when the session is missing or has no public access.
+    """
     session = db.query(ResearchSession).filter(ResearchSession.id == session_id).first()
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")

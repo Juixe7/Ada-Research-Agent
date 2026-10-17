@@ -1,3 +1,7 @@
+"""Creates research tracks and search questions from the user research brief.
+
+"""
+
 import json
 import re
 from typing import List, Dict, Any, Optional

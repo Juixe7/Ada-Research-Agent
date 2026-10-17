@@ -1,3 +1,7 @@
+"""Deterministic response-cache keying and storage for eligible LLM completions.
+
+"""
+
 import json
 import hashlib
 import time
@@ -24,6 +28,17 @@ class ResponseCache:
         return f"cache:llm:{h}"
 
     def get(self, model: str, messages: List[Dict[str, str]], temperature: float, **params) -> Optional[str]:
+        """Look up an eligible deterministic completion by its request key.
+
+        Args:
+            model: Fully qualified provider model name.
+            messages: Prompt messages used to compute the key.
+            temperature: Sampling temperature; non-deterministic calls bypass cache.
+            **params: Other generation settings included in cache identity.
+
+        Returns:
+            Cached response text, or `None` when absent or unavailable.
+        """
         # Only cache deterministic calls
         if temperature > 0.05:
             return None
@@ -49,6 +64,20 @@ class ResponseCache:
         return None
 
     def set(self, model: str, messages: List[Dict[str, str]], temperature: float, response: str, ttl: Optional[int] = None, **params) -> None:
+        """Store an eligible response under its deterministic completion key.
+
+        Args:
+            model: Fully qualified provider model name.
+            messages: Prompt messages used to compute the key.
+            temperature: Sampling temperature; ineligible calls are ignored.
+            response: Provider completion text.
+            ttl: Optional expiration in seconds; defaults to the configured TTL.
+            **params: Other generation settings included in cache identity.
+
+        Failure behavior:
+            Backend errors fall back to the bounded process-local cache and do
+            not affect the model response.
+        """
         if temperature > 0.05 or not response:
             return
 

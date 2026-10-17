@@ -1,3 +1,7 @@
+"""Publishes research lifecycle events and exposes active-run events as server-sent events.
+
+"""
+
 import json
 import uuid
 import asyncio
