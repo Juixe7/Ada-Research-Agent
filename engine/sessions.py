@@ -10,6 +10,7 @@ from engine.database import get_db
 from engine.auth import get_current_user, get_optional_user
 from engine.models import User, ResearchSession, ResearchTurn
 from engine.agents.evidence_delta import condense_session_turns
+from engine.report_artifacts import has_persisted_report_artifact
 
 sessions_router = APIRouter(prefix="/api/sessions", tags=["sessions"])
 DOSSIER_DIR = Path("dossiers")
@@ -42,12 +43,15 @@ def list_user_sessions(
             .all()
         )
         latest_turn = turns[-1] if turns else None
+        latest_status = latest_turn.status if latest_turn else "empty"
+        if latest_turn and latest_status == "completed" and not has_persisted_report_artifact(latest_turn.id, latest_turn.report_json_path):
+            latest_status = "failed"
         result.append({
             "id": s.id,
             "title": s.title,
             "turn_count": len(turns),
             "latest_query": latest_turn.query if latest_turn else "",
-            "latest_status": latest_turn.status if latest_turn else "empty",
+            "latest_status": latest_status,
             "created_at": s.created_at,
             "updated_at": s.updated_at
         })
@@ -85,22 +89,21 @@ def get_session_details(
     if not session:
         raise HTTPException(status_code=404, detail="Research session not found.")
 
-    # If user is logged in, ensure ownership or public visibility
-    if user and session.user_id != user.id:
-        # Check if at least one turn is public
-        public_turn = db.query(ResearchTurn).filter(
-            ResearchTurn.session_id == session_id,
-            ResearchTurn.is_public == True
-        ).first()
-        if not public_turn:
-            raise HTTPException(status_code=403, detail="Access denied to this private session.")
+    is_owner = bool(user and session.user_id == user.id)
+    if not is_owner and not db.query(ResearchTurn.id).filter(
+        ResearchTurn.session_id == session_id,
+        ResearchTurn.is_public.is_(True),
+    ).first():
+        raise HTTPException(status_code=404, detail="Research session not found.")
 
-    turns = (
+    turns_query = (
         db.query(ResearchTurn)
         .filter(ResearchTurn.session_id == session_id)
         .order_by(ResearchTurn.turn_index.asc())
-        .all()
     )
+    if not is_owner:
+        turns_query = turns_query.filter(ResearchTurn.is_public.is_(True))
+    turns = turns_query.all()
 
     turns_data = []
     for t in turns:
@@ -113,14 +116,20 @@ def get_session_details(
             except Exception:
                 pass
 
+        turn_status = t.status
+        turn_stage = t.stage
+        if turn_status == "completed" and not has_persisted_report_artifact(t.id, t.report_json_path):
+            turn_status = "failed"
+            turn_stage = "Report unavailable"
+
         turns_data.append({
             "id": t.id,
             "turn_index": t.turn_index,
             "query": t.query,
             "executive_title": t.executive_title or (preview_data.get("executive_title") if preview_data else None),
-            "status": t.status,
+            "status": turn_status,
             "progress": t.progress,
-            "stage": t.stage,
+            "stage": turn_stage,
             "is_public": t.is_public,
             "created_at": t.created_at,
             "report_id": t.id,
@@ -129,8 +138,7 @@ def get_session_details(
 
     return {
         "id": session.id,
-        "title": session.title,
-        "user_id": session.user_id,
+        "title": session.title if is_owner else "Shared research session",
         "created_at": session.created_at,
         "updated_at": session.updated_at,
         "turns": turns_data
@@ -230,20 +238,21 @@ def export_compiled_session(
     if not session:
         raise HTTPException(status_code=404, detail="Session not found.")
 
-    if not user or session.user_id != user.id:
-        public_turn = db.query(ResearchTurn).filter(
-            ResearchTurn.session_id == session_id,
-            ResearchTurn.is_public == True
-        ).first()
-        if not public_turn:
-            raise HTTPException(status_code=403, detail="Access denied to this private session.")
+    is_owner = bool(user and session.user_id == user.id)
+    if not is_owner and not db.query(ResearchTurn.id).filter(
+        ResearchTurn.session_id == session_id,
+        ResearchTurn.is_public.is_(True),
+    ).first():
+        raise HTTPException(status_code=404, detail="Session not found.")
 
-    turns = (
+    turns_query = (
         db.query(ResearchTurn)
         .filter(ResearchTurn.session_id == session_id)
         .order_by(ResearchTurn.turn_index.asc())
-        .all()
     )
+    if not is_owner:
+        turns_query = turns_query.filter(ResearchTurn.is_public.is_(True))
+    turns = turns_query.all()
 
     compiled_md = [
         f"# {session.title}",
@@ -266,6 +275,6 @@ def export_compiled_session(
 
     return {
         "session_id": session.id,
-        "title": session.title,
+        "title": session.title if is_owner else "Shared research session",
         "markdown": "\n".join(compiled_md)
     }

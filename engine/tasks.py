@@ -1,5 +1,7 @@
 import os
 import concurrent.futures
+import hashlib
+import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from engine.agents.planner import generate_research_plan
@@ -20,7 +22,11 @@ def normalize_and_deduplicate_evidence(raw_list: List[Dict[str, Any]]) -> List[D
     for item in raw_list:
         stype = item.get("source_type", "web")
         if stype == "user_doc":
-            key = f"doc::{item.get('doc_name')}::p{item.get('page_number')}"
+            passage_id = item.get("chunk_id")
+            if not passage_id:
+                normalized_text = re.sub(r"\s+", " ", item.get("text", "")).strip().casefold()
+                passage_id = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
+            key = f"doc::{item.get('doc_name')}::{passage_id}"
             if key not in seen_keys:
                 seen_keys.add(key)
                 item["source_id"] = f"D{doc_idx}"
@@ -61,130 +67,87 @@ def run_research_pipeline_sync(
     selected_docs: Optional[List[str]] = None,
     custom_angles: Optional[List[str]] = None,
     clarification_choice: Optional[str] = None,
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    blocked_domains: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
-    Multi-Threaded autonomous deep research pipeline:
-    1. Orthogonal DAG planning
-    2. Concurrent web & private vault retrieval
-    3. Adversarial Critic gap & contradiction audit
-    4. Dynamic Arbiter resolution
-    5. Long-context monograph synthesis
-    6. Deterministic citation & claim grounding verification
-    7. Multi-format artifact export
+    Executes the autonomous deep research pipeline using the compiled LangGraph StateGraph:
+    1. Scope & Brief formulation
+    2. Orthogonal DAG planning
+    3. Bounded iterative researcher loops across web & vault
+    4. Adversarial Critic gap & contradiction audit
+    5. Dynamic Arbiter resolution loop
+    6. Section-by-section synthesis with deterministic structured tables
+    7. Whole-report assembly & Executive Intelligence Briefing
+    8. Deterministic citation grounding & verification
+    9. Multi-format artifact export & Relational persistence
     """
-    print(f"\n[pipeline] 1. Planning research for: '{query}'")
-    plan = generate_research_plan(
+    from engine.graph.pipeline import execute_graph_pipeline
+    from engine.storage.relational_store import RelationalStore
+
+    print(f"\n[pipeline] Starting LangGraph Research Pipeline for: '{query}' (depth={depth})")
+
+    # Initialize run record in relational database
+    if report_id:
+        try:
+            RelationalStore.create_run(
+                question=query,
+                settings={"depth": depth, "include_user_docs": include_user_docs, "selected_docs": selected_docs, "custom_angles": custom_angles, "blocked_domains": blocked_domains or []},
+                user_id=user_id,
+                run_id=report_id,
+                plan=[]
+            )
+        except Exception as e:
+            print(f"[pipeline] Relational run init notice: {e}")
+
+    # Execute compiled LangGraph StateGraph
+    final_state = execute_graph_pipeline(
         query=query,
         depth=depth,
+        include_user_docs=include_user_docs,
+        report_id=report_id,
+        selected_docs=selected_docs,
         custom_angles=custom_angles,
-        clarification_context=clarification_choice
+        clarification_choice=clarification_choice,
+        user_id=user_id,
+        blocked_domains=blocked_domains,
     )
-    print(f"[pipeline] Generated {len(plan)} sub-question tracks.")
 
-    _update_stage(report_id, "scraping", f"Executing {len(plan)} parallel web & vector retrieval tracks...", 35)
-    print(f"[pipeline] 2. Fanning out to {len(plan)} research workers concurrently...")
-    results = []
-    with concurrent.futures.ThreadPoolExecutor(max_workers=max_workers) as executor:
-        futures = {
-            executor.submit(execute_sub_research, sub_task, include_user_docs, 2, selected_docs, user_id): sub_task
-            for sub_task in plan
-        }
-        for future in concurrent.futures.as_completed(futures):
-            sub_task = futures[future]
-            try:
-                data = future.result()
-                results.append(data)
-                print(f"  ✓ Finished track {data['sub_task_id']} ({data['category']}): {data['evidence_count']} sources in {data['duration_seconds']}s")
-            except Exception as e:
-                print(f"  ✗ Track failed for '{sub_task.get('sub_question')}': {e}")
-
-    # Aggregate and deduplicate evidence across all workers
-    raw_evidence = []
-    for res in results:
-        raw_evidence.extend(res.get("evidence", []))
-    all_evidence = normalize_and_deduplicate_evidence(raw_evidence)
-
-    # ── Step 3: Run Adversarial Critic & Auditor ──
-    _update_stage(report_id, "critic", f"Auditing {len(all_evidence)} sources for contradictions and coverage gaps...", 60)
-    print(f"\n[pipeline] 3. Running Adversarial Critic & Gap Auditor over {len(all_evidence)} sources...")
-    from engine.agents.critic import audit_research_evidence
-    critic_audit = audit_research_evidence(query, plan, all_evidence)
-    print(f"[pipeline] Critic Coverage Score: {critic_audit.get('coverage_score', 80)}/100 ({critic_audit.get('coverage_quality', 'moderate')})")
-    print(f"[pipeline] Gaps Identified: {len(critic_audit.get('identified_gaps', []))} | Contradictions: {len(critic_audit.get('contradictions', []))}")
-
-    # ── Step 4: Execute Dynamic Arbiter Queries (if gaps/contradictions detected) ──
-    arbiter_queries = critic_audit.get("arbiter_queries", [])
-    arbiter_result = None
-    if arbiter_queries:
-        _update_stage(report_id, "arbiter", "Dispatching Arbiter queries to reconcile conflicting claims...", 72)
-        print(f"[pipeline] 4. Dispatching Arbiter Task to resolve gaps: {arbiter_queries}")
-        arbiter_sub_task = {
-            "id": "ARBITER",
-            "category": "contradiction_arbitration",
-            "sub_question": "Arbitrate identified contradictions and knowledge gaps",
-            "search_queries": arbiter_queries
-        }
-        arbiter_result = execute_sub_research(
-            arbiter_sub_task,
-            include_user_docs=include_user_docs,
-            max_pages_to_scrape=2,
-            selected_docs=selected_docs,
-            user_id=user_id
-        )
-        print(f"  ✓ Arbiter gathered {arbiter_result['evidence_count']} clarifying sources in {arbiter_result['duration_seconds']}s")
-        raw_evidence.extend(arbiter_result.get("evidence", []))
-        all_evidence = normalize_and_deduplicate_evidence(raw_evidence)
-
-    # ── Step 5: Synthesize Long-Form Research Dossier (Gemini 1M Context) ──
-    _update_stage(report_id, "synthesizing", f"Synthesizing long-form monograph over {len(all_evidence)} verified sources...", 85)
-    print(f"\n[pipeline] 5. Synthesizing full research dossier with Gemini 1M context over {len(all_evidence)} sources...")
-    from engine.agents.synthesizer import synthesize_research_dossier
-    raw_dossier_markdown = synthesize_research_dossier(query, all_evidence, critic_audit)
-
-    # ── Step 6: Deterministic Citation Grounding & Verification ──
-    print(f"[pipeline] 6. Verifying citation grounding and eliminating hallucinations...")
-    from engine.guards.citation_guard import verify_and_ground_citations
-    guard_results = verify_and_ground_citations(raw_dossier_markdown, all_evidence)
-    print(f"[pipeline] Faithfulness Score: {round(guard_results['faithfulness_score']*100, 1)}% | Cited Sources: {guard_results['unique_valid_sources_cited']}")
-    if guard_results['hallucinated_sources_count'] > 0:
-        print(f"[pipeline] Cleaned {guard_results['hallucinated_sources_count']} unverified citation tags ({guard_results.get('rejected_claims_count', 0)} unrecorded claims rejected).")
-
-    # ── Step 7: Export Dossier Artifacts (Markdown, JSON, HTML) ──
-    print(f"[pipeline] 7. Exporting multi-format research dossier...")
-    from engine.export.exporter import export_research_dossier
-    export_paths = export_research_dossier(
-        query=query,
-        final_report_markdown=guard_results["cleaned_markdown"],
-        guard_results=guard_results,
-        critic_audit=critic_audit,
-        evidence_manifest=all_evidence,
-        report_id=report_id
-    )
+    export_paths = final_state.get("export_paths") or {}
+    guard_results = final_state.get("guard_results") or {}
+    scores = final_state.get("scores") or {}
+    plan = final_state.get("plan") or []
+    all_evidence = final_state.get("evidence_manifest") or []
+    critic_findings = final_state.get("critic_findings") or {}
 
     return {
-        "report_id": export_paths["report_id"],
+        "report_id": export_paths.get("report_id", report_id),
         "query": query,
         "executive_title": export_paths.get("executive_title", query),
         "plan": plan,
-        "sub_tasks_count": len(results),
+        "sub_tasks_count": len(plan),
         "total_evidence_units": len(all_evidence),
-        "sub_task_results": results,
-        "critic_audit": critic_audit,
-        "arbiter_executed": bool(arbiter_queries),
-        "arbiter_result": arbiter_result,
+        "sub_task_results": final_state.get("track_status", {}),
+        "critic_audit": critic_findings,
+        "arbiter_executed": final_state.get("round", 0) > 1,
         "evidence_manifest": all_evidence,
         "guard_results": guard_results,
         "citation_index": guard_results.get("citation_index", {}),
-        "faithfulness_score": guard_results.get("faithfulness_score", 1.0),
-        "coverage_score": critic_audit.get("coverage_score", 85),
+        "faithfulness_score": scores.get("faithfulness"),
+        "coverage_score": int(scores["coverage"] * 100) if scores.get("coverage") is not None else None,
+        "relevancy_score": scores.get("relevancy"),
+        "authority_score": scores.get("authority"),
+        "citation_validity_score": scores.get("citation_validity"),
+        "research_warnings": final_state.get("warnings", []),
         "total_sources_cited": guard_results.get("unique_valid_sources_cited", 0),
-        "report_markdown": guard_results["cleaned_markdown"],
-        "export_paths": export_paths
+        "report_markdown": final_state.get("report_markdown", ""),
+        "export_paths": export_paths,
+        "sections": final_state.get("sections", {}),
+        "outline": final_state.get("outline", [])
     }
 
 
-@celery_app.task(name="ada.run_research_pipeline")
+@celery_app.task(name="ada.run_research_pipeline", queue="orchestrate")
 def run_research_pipeline_task(
     report_id: str,
     session_id: Optional[str],
@@ -194,7 +157,8 @@ def run_research_pipeline_task(
     selected_docs: Optional[List[str]] = None,
     custom_angles: Optional[List[str]] = None,
     clarification_choice: Optional[str] = None,
-    user_id: Optional[str] = None
+    user_id: Optional[str] = None,
+    blocked_domains: Optional[List[str]] = None,
 ) -> Dict[str, Any]:
     """
     Celery distributed worker task entrypoint (also callable directly via FastAPI BackgroundTasks in local dev).
@@ -220,7 +184,8 @@ def run_research_pipeline_task(
             selected_docs=selected_docs,
             custom_angles=custom_angles,
             clarification_choice=clarification_choice,
-            user_id=user_id
+            user_id=user_id,
+            blocked_domains=blocked_domains,
         )
 
         after = get_job_state(report_id)
@@ -274,6 +239,11 @@ def run_research_pipeline_task(
             "error": str(e)
         }
         set_job_state(report_id, failed_state)
+        try:
+            from engine.events import publish_event
+            publish_event(report_id, "run_failed", {"error": str(e)})
+        except Exception:
+            pass
 
         db_turn = task_db.query(ResearchTurn).filter(ResearchTurn.id == report_id).first()
         if db_turn:

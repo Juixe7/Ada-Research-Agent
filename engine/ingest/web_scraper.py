@@ -4,9 +4,8 @@ import socket
 import ipaddress
 import requests
 from typing import Dict, Any, Optional
-from urllib.parse import urlparse
+from urllib.parse import urljoin, urlparse
 import trafilatura
-from engine.config import JINA_READER_PREFIX
 
 # Standard desktop User-Agent
 DEFAULT_HEADERS = {
@@ -22,6 +21,10 @@ def is_safe_public_url(url: str) -> bool:
     try:
         parsed = urlparse(url)
         if parsed.scheme not in ("http", "https"):
+            return False
+        if parsed.username or parsed.password:
+            return False
+        if parsed.port and parsed.port not in (80, 443):
             return False
         hostname = parsed.hostname
         if not hostname:
@@ -56,10 +59,9 @@ def clean_markdown_content(raw_text: str) -> str:
 
 def scrape_webpage(url: str, timeout: int = 12) -> Dict[str, Any]:
     """
-    3-Tier Resilient Scraper with SSRF Protection:
-    Tier 1: Trafilatura (Ultra-fast, ~1s for open blogs/wikis)
-    Tier 2: Jina Reader API (Headless browser rendering, bypasses Cloudflare/anti-bot on news sites)
-    Tier 3: Graceful degradation flag if blocked
+    Fetches only validated public URLs, follows at most four independently
+    validated redirects, and caps response size. Search snippets remain the
+    fallback when a source cannot be fetched safely.
     """
     domain = urlparse(url).netloc.replace("www.", "")
     t0 = time.time()
@@ -76,9 +78,44 @@ def scrape_webpage(url: str, timeout: int = 12) -> Dict[str, Any]:
             "char_count": 0
         }
     
-    # ── Tier 1: Trafilatura Direct Extraction ──
+    # ── Bounded direct fetch with redirect validation ──
     try:
-        downloaded = trafilatura.fetch_url(url)
+        current_url = url
+        response = None
+        for _ in range(5):
+            if not is_safe_public_url(current_url):
+                return {"url": url, "domain": domain, "title": f"Blocked redirect from {domain}", "text": "", "method": "blocked_redirect", "latency": round(time.time() - t0, 2), "char_count": 0}
+            response = requests.get(
+                current_url,
+                headers=DEFAULT_HEADERS,
+                timeout=(4, timeout),
+                allow_redirects=False,
+                stream=True,
+            )
+            if response.is_redirect:
+                location = response.headers.get("Location")
+                response.close()
+                if not location:
+                    response = None
+                    break
+                current_url = urljoin(current_url, location)
+                continue
+            break
+        if response is not None and response.status_code == 200:
+            content = bytearray()
+            for chunk in response.iter_content(chunk_size=65536):
+                content.extend(chunk)
+                if len(content) > 5 * 1024 * 1024:
+                    break
+            response.close()
+            if len(content) <= 5 * 1024 * 1024:
+                downloaded = bytes(content)
+            else:
+                downloaded = None
+        else:
+            if response is not None:
+                response.close()
+            downloaded = None
         if downloaded:
             extracted = trafilatura.extract(
                 downloaded,
@@ -101,32 +138,7 @@ def scrape_webpage(url: str, timeout: int = 12) -> Dict[str, Any]:
     except Exception as e:
         print(f"[scraper] Tier 1 Trafilatura bypassed for {url}: {e}")
 
-    # ── Tier 2: Jina Reader API Fallback ──
-    try:
-        jina_url = f"{JINA_READER_PREFIX}{url}"
-        resp = requests.get(jina_url, headers=DEFAULT_HEADERS, timeout=timeout)
-        if resp.status_code == 200 and len(resp.text.strip()) >= 150:
-            lines = resp.text.split("\n")
-            title = f"Document from {domain}"
-            for line in lines[:5]:
-                if line.startswith("# "):
-                    title = line.replace("# ", "").strip()
-                    break
-
-            cleaned = clean_markdown_content(resp.text)
-            return {
-                "url": url,
-                "domain": domain,
-                "title": title,
-                "text": cleaned,
-                "method": "jina_reader_cloud",
-                "latency": round(time.time() - t0, 2),
-                "char_count": len(cleaned)
-            }
-    except Exception as e:
-        print(f"[scraper] Tier 2 Jina Reader failed for {url}: {e}")
-
-    # ── Tier 3: Return Empty (signals worker to use search snippet) ──
+    # Return empty so the worker can use the provider's search snippet.
     return {
         "url": url,
         "domain": domain,

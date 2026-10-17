@@ -1,18 +1,39 @@
 import re
-from typing import List, Dict, Any
+from typing import List, Dict, Any, Optional
 
 CITATION_REGEX = re.compile(r'\[(S\d+|D\d+)\]')
 
+
+def extract_cited_claims(report_markdown: str, evidence_manifest: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Extract citation-bearing sentences using the same stable ordering as the verifier."""
+    valid_sources = {ev.get("source_id") for ev in evidence_manifest if ev.get("source_id")}
+    claims: List[Dict[str, Any]] = []
+    for line in report_markdown.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("- **["):
+            continue
+        if stripped.startswith("|") and not re.fullmatch(r"\|?[\s:|-]+\|?", stripped):
+            tags = list(dict.fromkeys(cid for cid in CITATION_REGEX.findall(stripped) if cid in valid_sources))
+            if tags:
+                claims.append({"claim_id": len(claims) + 1, "sentence": stripped, "tags": tags})
+            continue
+        for sentence in re.split(r"(?<=[.!?])\s+", line):
+            tags = list(dict.fromkeys(cid for cid in CITATION_REGEX.findall(sentence) if cid in valid_sources))
+            if tags and len(CITATION_REGEX.sub("", sentence).strip()) > 10:
+                claims.append({"claim_id": len(claims) + 1, "sentence": sentence.strip(), "tags": tags})
+    return claims
+
 def verify_and_ground_citations(
     report_markdown: str,
-    evidence_manifest: List[Dict[str, Any]]
+    evidence_manifest: List[Dict[str, Any]],
+    claim_verdicts: Optional[Dict[int, Dict[str, str]]] = None,
 ) -> Dict[str, Any]:
     """
-    Deterministic Citation & Claim Grounding Validator:
+    Deterministic Citation Reference Validator:
     1. Extracts all inline bracketed citations [S1], [D2] from the synthesized markdown.
     2. Validates that every citation ID exists in the manifest of retrieved sources.
-    3. Rejects claims (sentences/bullet points) that rely solely on unrecorded/hallucinated
-       source IDs, and scrubs phantom tags from multi-source sentences.
+    3. Removes lines whose only citations are unrecorded IDs, and scrubs phantom tags
+       from lines that also contain valid citations. This does not verify entailment.
     4. Compiles an interactive Citation Directory for frontend hover popups and bibliographies.
     """
     # Build dictionary of valid source IDs from manifest
@@ -31,10 +52,13 @@ def verify_and_ground_citations(
         else:
             hallucinated_ids.append(cid)
 
-    # Compute deterministic faithfulness metric
+    # This ratio measures citation-ID validity only. It is deliberately kept
+    # separate from faithfulness, which requires claim-level entailment checks.
     total_found_instances = len(all_citations_found)
     valid_instances = sum(1 for c in all_citations_found if c in valid_sources)
-    faithfulness_score = (valid_instances / total_found_instances) if total_found_instances > 0 else 1.0
+    # This is a citation-reference validity ratio, not a claim-entailment score.
+    # A report with no citations has no measured grounding and must not score 100%.
+    faithfulness_score = (valid_instances / total_found_instances) if total_found_instances > 0 else 0.0
 
     # Build interactive citation index for frontend UI
     citation_index = {}
@@ -97,9 +121,77 @@ def verify_and_ground_citations(
 
         cleaned_markdown = "\n".join(cleaned_lines)
 
+    # Keep only unsupported claim sentences out of the final report. Partial and
+    # unverified claims remain visible with explicit status in the Inspector.
+    verdicts = claim_verdicts or {}
+    verified_claims: List[Dict[str, Any]] = []
+    claim_id = 0
+    verified_lines: List[str] = []
+    for line in cleaned_markdown.splitlines():
+        stripped = line.strip()
+        if not stripped or stripped.startswith("#") or stripped.startswith("- **["):
+            verified_lines.append(line)
+            continue
+        if stripped.startswith("|"):
+            tags = [cid for cid in CITATION_REGEX.findall(line) if cid in valid_sources]
+            if not tags or re.fullmatch(r"\|?[\s:|-]+\|?", stripped):
+                verified_lines.append(line)
+                continue
+            claim_id += 1
+            audit = verdicts.get(claim_id, {})
+            verdict = audit.get("verdict", "unverified")
+            verified_claims.append({
+                "claim_id": claim_id,
+                "sentence": stripped,
+                "tags": tags,
+                "verdict": verdict,
+                "reason": audit.get("reason", "Claim entailment was unavailable for this table row."),
+            })
+            if verdict == "unsupported":
+                rejected_claims.append(stripped)
+            else:
+                verified_lines.append(line)
+            continue
+        line_citations = [cid for cid in CITATION_REGEX.findall(line) if cid in valid_sources]
+        if not line_citations:
+            verified_lines.append(line)
+            continue
+        sentences = re.split(r"(?<=[.!?])\s+", line)
+        kept = []
+        for sentence in sentences:
+            tags = [cid for cid in CITATION_REGEX.findall(sentence) if cid in valid_sources]
+            if not tags:
+                kept.append(sentence)
+                continue
+            claim_id += 1
+            audit = verdicts.get(claim_id, {})
+            verdict = audit.get("verdict", "unverified")
+            verified_claims.append({
+                "claim_id": claim_id,
+                "sentence": sentence.strip(),
+                "tags": tags,
+                "verdict": verdict,
+                "reason": audit.get("reason", "Claim entailment was unavailable for this sentence."),
+            })
+            if verdict != "unsupported":
+                kept.append(sentence)
+            else:
+                rejected_claims.append(sentence.strip())
+        if kept:
+            verified_lines.append(" ".join(kept))
+    cleaned_markdown = "\n".join(verified_lines)
+
+    audited = [item for item in verified_claims if item["verdict"] in {"supported", "partial", "unsupported"}]
+    supported = sum(1 for item in audited if item["verdict"] == "supported")
+    entailment_score = round(supported / len(audited), 4) if audited else None
+
     return {
-        "is_grounded": len(hallucinated_ids) == 0,
-        "faithfulness_score": round(faithfulness_score, 4),
+        "is_grounded": total_found_instances > 0 and len(hallucinated_ids) == 0,
+        "faithfulness_score": entailment_score,
+        "citation_validity_score": round(faithfulness_score, 4) if total_found_instances else None,
+        "claims": verified_claims,
+        "claims_audited": len(audited),
+        "claims_supported": supported,
         "total_citations_count": total_found_instances,
         "unique_valid_sources_cited": len(valid_cited_ids),
         "hallucinated_sources_count": len(hallucinated_ids),

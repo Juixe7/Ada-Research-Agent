@@ -44,7 +44,7 @@ def format_evidence_xml(manifest: List[Dict[str, Any]]) -> str:
         stype = ev.get("source_type", "web")
         title = html.escape(ev.get("title", "Untitled Source"))
         auth = ev.get("authority_score", 0.7)
-        
+
         if stype == "user_doc":
             dname = html.escape(ev.get("doc_name", "User Doc"))
             pnum = ev.get("page_number", 1)
@@ -67,19 +67,17 @@ def format_evidence_xml(manifest: List[Dict[str, Any]]) -> str:
 def synthesize_research_dossier(
     query: str,
     evidence_manifest: List[Dict[str, Any]],
-    critic_audit: Dict[str, Any]
+    critic_audit: Dict[str, Any],
+    run_id: Optional[str] = None,
 ) -> str:
     """
-    Synthesizes the entire evidence corpus using Gemini 1M context into a long-form cited dossier.
+    Synthesizes the entire evidence corpus using the LiteLLM Gateway 'write' group
+    (Gemini with automatic Groq fallback, rate limiting, and backoff).
     """
-    genai.configure(api_key=GEMINI_API_KEY)
-    model = genai.GenerativeModel(
-        model_name=GEMINI_SYNTHESIS_MODEL,
-        system_instruction=SYNTHESIZER_SYSTEM_INSTRUCTION
-    )
+    from engine.agents.llm_resilient import call_gateway
 
     evidence_xml = format_evidence_xml(evidence_manifest)
-    
+
     contradictions_summary = ""
     for c in critic_audit.get("contradictions", []):
         contradictions_summary += f"- Topic: {c.get('topic')}\n  Viewpoint A: {c.get('claim_a')}\n  Viewpoint B: {c.get('claim_b')}\n  Analysis: {c.get('analysis')}\n"
@@ -101,51 +99,25 @@ VERIFIED EVIDENCE CORPUS ({len(evidence_manifest)} Sources):
 Synthesize the definitive, publication-grade research report on this topic. Ensure heavy, accurate citation coverage using [Sx] and [Dx] notation throughout the text.
 """
 
-    print(f"[synthesizer] Prompting {GEMINI_SYNTHESIS_MODEL} with {len(evidence_manifest)} sources (~{len(evidence_xml)//4} tokens)...")
-    
-    # ── Tier 1: Gemini 1M Context with Automatic 429 Backoff Retry ──
-    import time
-    for attempt in range(2):
-        try:
-            response = model.generate_content(
-                user_prompt,
-                generation_config=genai.types.GenerationConfig(
-                    temperature=0.15,
-                    max_output_tokens=8192
-                ),
-                request_options={"timeout": 20}
-            )
-            if response and response.text:
-                return response.text.strip()
-        except Exception as e:
-            err_str = str(e)
-            print(f"[synthesizer] Gemini attempt {attempt+1} error: {err_str[:120]}...")
-            if ("429" in err_str or "quota" in err_str.lower()) and attempt < 1:
-                wait_sec = 6
-                print(f"[synthesizer] Rate limit hit. Backing off for {wait_sec}s...")
-                time.sleep(wait_sec)
-                continue
-            break
+    print(f"[synthesizer] Prompting Gateway write group with {len(evidence_manifest)} sources (~{len(evidence_xml)//4} tokens)...")
 
-    # ── Tier 2: Groq Fallback (Zero Quota Overlap with Google) ──
-    try:
-        from groq import Groq
-        from engine.config import GROQ_API_KEY, GROQ_PLANNER_MODEL
-        print(f"[synthesizer] Engaging Tier-2 Groq fallback ({GROQ_PLANNER_MODEL})...")
-        groq_client = Groq(api_key=GROQ_API_KEY)
-        truncated_prompt = user_prompt[:26000] if len(user_prompt) > 26000 else user_prompt
-        resp = groq_client.chat.completions.create(
-            messages=[
-                {"role": "system", "content": SYNTHESIZER_SYSTEM_INSTRUCTION},
-                {"role": "user", "content": truncated_prompt}
-            ],
-            model=GROQ_PLANNER_MODEL,
-            temperature=0.15,
-            max_tokens=4096
-        )
-        if resp.choices and resp.choices[0].message.content:
-            return resp.choices[0].message.content.strip()
-    except Exception as groq_err:
-        print(f"[synthesizer] Groq fallback error: {groq_err}")
+    messages = [
+        {"role": "system", "content": SYNTHESIZER_SYSTEM_INSTRUCTION},
+        {"role": "user", "content": user_prompt}
+    ]
+
+    res = call_gateway(
+        group="write",
+        messages=messages,
+        temperature=0.15,
+        max_tokens=8192,
+        json_mode=False,
+        timeout=60.0,
+        run_id=run_id,
+        agent_name="synthesizer",
+    )
+
+    if res.content:
+        return res.content.strip()
 
     return f"# Research Report: {query}\n\nSynthesis could not complete due to provider rate limits. Evidence manifest preserved ({len(evidence_manifest)} sources collected)."

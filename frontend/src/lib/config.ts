@@ -28,4 +28,41 @@ function toWsUrl(httpUrl: string): string {
 
 const WS_URL = toWsUrl(API_URL);
 
+/**
+ * Formats a dossier creation timestamp safely.
+ * Handles ISO strings, Unix timestamps in seconds (< 1e11), and Unix milliseconds.
+ * Guaranteed never to produce 1970 for modern timestamps.
+ */
+export function formatDossierDate(val: string | number | undefined | null): string {
+  if (!val) return "Recent";
+
+  let d: Date;
+  if (typeof val === "number") {
+    d = new Date(val < 1e11 ? val * 1000 : val);
+  } else {
+    const num = Number(val);
+    if (!isNaN(num) && num > 0) {
+      d = new Date(num < 1e11 ? num * 1000 : num);
+    } else {
+      d = new Date(val);
+    }
+  }
+
+  if (isNaN(d.getTime()) || d.getFullYear() <= 1971) {
+    return "Recent";
+  }
+
+  const now = new Date();
+  const isToday = d.toDateString() === now.toDateString();
+  if (isToday) {
+    return d.toLocaleTimeString([], { hour: "numeric", minute: "2-digit" });
+  }
+
+  return d.toLocaleDateString(undefined, {
+    month: "short",
+    day: "numeric",
+    year: d.getFullYear() !== now.getFullYear() ? "numeric" : undefined,
+  });
+}
+
 export { API_URL, WS_URL };

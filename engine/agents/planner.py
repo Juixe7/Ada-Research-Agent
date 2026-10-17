@@ -28,13 +28,16 @@ def generate_research_plan(
     query: str,
     depth: str = "deep",
     custom_angles: Optional[List[str]] = None,
-    clarification_context: Optional[str] = None
+    clarification_context: Optional[str] = None,
+    run_id: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
     """
     Decomposes a research topic into an orthogonal DAG of sub-questions and search vectors.
     Respects user-approved research angles and clarification choices from the Pre-Flight Blueprint.
     """
-    num_questions = len(custom_angles) if custom_angles and len(custom_angles) > 0 else (3 if depth == "quick" else 5)
+    num_questions = len(custom_angles) if custom_angles and len(custom_angles) > 0 else {
+        "quick": 3, "standard": 4, "deep": 5
+    }.get(depth, 4)
     
     prompt_lines = [
         f'Research Topic: "{query}"'
@@ -55,7 +58,9 @@ def generate_research_plan(
         user_prompt=user_prompt,
         temperature=0.1,
         max_tokens=1200,
-        json_mode=False
+        json_mode=False,
+        run_id=run_id,
+        agent_name="planner",
     )
     if content:
         try:
@@ -65,7 +70,7 @@ def generate_research_plan(
                 clean_json = re.sub(r',\s*([\]\}])', r'\1', raw_json)
                 plan = json.loads(clean_json)
                 if isinstance(plan, list) and len(plan) > 0:
-                    return plan
+                    return plan[:6]
         except Exception as e:
             print(f"[planner] Lead Planner parse error ({e}).")
 

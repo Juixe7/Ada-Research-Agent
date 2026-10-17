@@ -1,11 +1,18 @@
 name: Ada CI/CD — Test & Deploy to AWS EC2
 
 on:
-  push:
+  pull_request:
     branches:
       - main
       - master
+  push:
   workflow_dispatch:
+    inputs:
+      deploy_production:
+        description: Deploy to the configured AWS instance (main/master only)
+        required: true
+        type: boolean
+        default: false
 
 jobs:
   verify:
@@ -46,11 +53,19 @@ jobs:
           npm ci
           npx tsc --noEmit
 
+      - name: Validate and build Docker deployment images
+        env:
+          JWT_SECRET: ci-docker-build-secret-key-2026
+          DATABASE_URL: sqlite:////app/data/ada.db
+        run: |
+          docker compose config --quiet
+          docker compose build backend frontend
+
   deploy:
     name: 2. Deploy Docker Stack to AWS EC2 (t3.small)
     needs: verify
     runs-on: ubuntu-latest
-    if: github.event_name == 'push' || github.event_name == 'workflow_dispatch'
+    if: github.event_name == 'workflow_dispatch' && inputs.deploy_production == true && (github.ref == 'refs/heads/main' || github.ref == 'refs/heads/master')
     steps:
       - name: Deploy via SSH to EC2 Instance
         uses: appleboy/ssh-action@v1.0.3

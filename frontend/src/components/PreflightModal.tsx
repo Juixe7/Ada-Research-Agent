@@ -103,28 +103,28 @@ export default function PreflightModal({
 
   return (
     <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md flex items-center justify-center p-4 sm:p-6 overflow-y-auto animate-in fade-in duration-150">
-      <div className="bg-[#12131a] border border-white/[0.1] w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh]">
+      <div className="bg-[var(--surface)] border border-[var(--line)] w-full max-w-2xl rounded-2xl shadow-2xl overflow-hidden flex flex-col my-auto max-h-[90vh]">
         
         {/* Header */}
-        <div className="p-6 border-b border-white/[0.08] flex items-start justify-between gap-4 bg-[#141620]">
+        <div className="p-6 border-b border-[var(--line)] flex items-start justify-between gap-4 bg-[var(--surface-2)]">
           <div className="space-y-1.5 min-w-0">
-            <div className="inline-flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-zinc-400">
-              <Compass className="w-3.5 h-3.5 text-zinc-300" />
+            <div className="inline-flex items-center gap-2 text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)]">
+              <Compass className="w-3.5 h-3.5 text-[var(--ink-2)]" />
               <span>Research Blueprint</span>
-              <span className="text-zinc-600">•</span>
-              <span className="text-zinc-400">Estimated ~30s</span>
+              <span className="text-[var(--ink-4)]">•</span>
+              <span className="text-[var(--ink-3)]">Estimated ~30s</span>
             </div>
-            <h2 className="text-xl font-serif font-bold text-[#fafaf9] tracking-tight">
+            <h2 className="text-xl font-serif font-bold text-[var(--ink)] tracking-tight">
               Review Investigation Plan
             </h2>
-            <p className="text-xs text-zinc-400 truncate italic font-serif">
+            <p className="text-xs text-[var(--ink-3)] truncate italic font-serif">
               &ldquo;{query}&rdquo;
             </p>
           </div>
 
           <button
             onClick={onClose}
-            className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer shrink-0"
+            className="p-1.5 rounded-lg text-[var(--ink-3)] hover:text-[var(--ink)] hover:bg-[var(--surface-3)] transition-colors cursor-pointer shrink-0"
             title="Cancel"
           >
             <X className="w-4 h-4" />
@@ -136,15 +136,15 @@ export default function PreflightModal({
           
           {/* Ambiguity / Multi-Context Diagnosis */}
           {hasAmbiguity ? (
-            <div className="space-y-3.5 p-4 rounded-xl bg-white/[0.03] border border-white/[0.08]">
+            <div className="space-y-3.5 p-4 rounded-xl bg-[var(--surface-2)] border border-[var(--line)]">
               <div className="space-y-1">
-                <span className="text-[10px] font-mono text-zinc-400 uppercase tracking-wider font-semibold">
+                <span className="text-[10px] font-mono text-[var(--ink-3)] uppercase tracking-wider font-semibold">
                   Context Guidance
                 </span>
-                <h4 className="text-xs font-semibold text-zinc-200">
+                <h4 className="text-xs font-semibold text-[var(--ink)]">
                   Multiple perspectives identified for this topic
                 </h4>
-                <p className="text-xs text-zinc-400 leading-relaxed">
+                <p className="text-xs text-[var(--ink-2)] leading-relaxed">
                   {blueprint.ambiguity_explanation}
                 </p>
               </div>
@@ -152,26 +152,26 @@ export default function PreflightModal({
               {/* Source Origin Comparison */}
               <div className="grid grid-cols-1 sm:grid-cols-2 gap-2.5 pt-1">
                 {sources.vault && (
-                  <div className="bg-[#161822] p-3 rounded-lg border border-white/[0.08] space-y-1">
-                    <span className="text-[10px] font-mono text-zinc-400 font-medium flex items-center gap-1.5">
-                      <FileText className="w-3 h-3 text-zinc-400" />
+                  <div className="bg-[var(--surface-3)] p-3 rounded-lg border border-[var(--line)] space-y-1">
+                    <span className="text-[10px] font-mono text-[var(--ink-3)] font-medium flex items-center gap-1.5">
+                      <FileText className="w-3 h-3 text-[var(--ink-3)]" />
                       <span>From Private Vault</span>
                     </span>
-                    <p className="text-xs font-semibold text-[#fafaf9] truncate">{sources.vault.doc_name}</p>
-                    <p className="text-[11px] text-zinc-400 line-clamp-2 italic">
+                    <p className="text-xs font-semibold text-[var(--ink)] truncate">{sources.vault.doc_name}</p>
+                    <p className="text-[11px] text-[var(--ink-3)] line-clamp-2 italic">
                       &ldquo;{sources.vault.snippet}&rdquo;
                     </p>
                   </div>
                 )}
 
                 {sources.web && (
-                  <div className="bg-[#161822] p-3 rounded-lg border border-white/[0.08] space-y-1">
-                    <span className="text-[10px] font-mono text-zinc-400 font-medium flex items-center gap-1.5">
-                      <Globe className="w-3 h-3 text-zinc-400" />
+                  <div className="bg-[var(--surface-3)] p-3 rounded-lg border border-[var(--line)] space-y-1">
+                    <span className="text-[10px] font-mono text-[var(--ink-3)] font-medium flex items-center gap-1.5">
+                      <Globe className="w-3 h-3 text-[var(--ink-3)]" />
                       <span>From Public Web</span>
                     </span>
-                    <p className="text-xs font-semibold text-[#fafaf9] truncate">{sources.web.entity}</p>
-                    <p className="text-[11px] text-zinc-400 line-clamp-2 italic">
+                    <p className="text-xs font-semibold text-[var(--ink)] truncate">{sources.web.entity}</p>
+                    <p className="text-[11px] text-[var(--ink-3)] line-clamp-2 italic">
                       &ldquo;{sources.web.snippet}&rdquo;
                     </p>
                   </div>
@@ -180,8 +180,8 @@ export default function PreflightModal({
 
               {/* Clarification Choice Selector */}
               {blueprint.clarification_options?.length > 0 && (
-                <div className="space-y-2 pt-2 border-t border-white/[0.06]">
-                  <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block font-semibold">
+                <div className="space-y-2 pt-2 border-t border-[var(--line)]">
+                  <span className="text-[11px] font-mono text-[var(--ink-3)] uppercase tracking-wider block font-semibold">
                     Choose primary direction:
                   </span>
                   <div className="space-y-1.5">
@@ -194,8 +194,8 @@ export default function PreflightModal({
                         }}
                         className={`flex items-start gap-3 p-3 rounded-xl border text-xs cursor-pointer transition-all ${
                           selectedClarification === opt.id && !showCustomInput
-                            ? "bg-white/[0.08] border-white/[0.2] text-[#fafaf9]"
-                            : "bg-[#161822] border-white/[0.06] text-zinc-400 hover:text-zinc-200 hover:border-white/[0.12]"
+                            ? "bg-[var(--surface-3)] border-[var(--accent)] text-[var(--ink)]"
+                            : "bg-[var(--surface-2)] border-[var(--line)] text-[var(--ink-3)] hover:text-[var(--ink-2)] hover:border-[var(--line-strong)]"
                         }`}
                       >
                         <input
@@ -203,11 +203,11 @@ export default function PreflightModal({
                           name="clarification"
                           checked={selectedClarification === opt.id && !showCustomInput}
                           onChange={() => {}}
-                          className="mt-0.5 text-zinc-300 focus:ring-zinc-400 cursor-pointer accent-zinc-300"
+                          className="mt-0.5 text-[var(--accent)] focus:ring-[var(--accent)] cursor-pointer accent-[var(--accent)]"
                         />
                         <div className="space-y-0.5">
-                          <p className="font-semibold text-[#fafaf9]">{opt.title}</p>
-                          <p className="text-[11px] text-zinc-400">{opt.description}</p>
+                          <p className="font-semibold text-[var(--ink)]">{opt.title}</p>
+                          <p className="text-[11px] text-[var(--ink-3)]">{opt.description}</p>
                         </div>
                       </label>
                     ))}
@@ -221,7 +221,7 @@ export default function PreflightModal({
           {blueprint.research_angles?.length > 0 && (
             <div className="space-y-2.5">
               <div className="flex items-center justify-between">
-                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-semibold">
+                <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold">
                   Angles to Explore ({activeAngles.length} of {blueprint.research_angles.length} active)
                 </span>
               </div>
@@ -235,23 +235,23 @@ export default function PreflightModal({
                       onClick={() => toggleAngle(angle.title)}
                       className={`flex items-center justify-between p-3.5 rounded-xl border text-xs cursor-pointer transition-all ${
                         isChecked
-                          ? "bg-[#161822] border-white/[0.12] text-zinc-100 shadow-sm"
-                          : "bg-black/20 border-white/[0.04] text-zinc-500 opacity-60"
+                          ? "bg-[var(--surface-2)] border-[var(--line-strong)] text-[var(--ink)] shadow-xs"
+                          : "bg-[var(--surface)] border-[var(--line)] text-[var(--ink-4)] opacity-60"
                       }`}
                     >
                       <div className="flex items-center gap-3 min-w-0 flex-1">
                         <div className={`w-4 h-4 rounded flex items-center justify-center border text-[10px] shrink-0 transition-colors ${
-                          isChecked ? "bg-zinc-200 border-zinc-200 text-zinc-950 font-bold" : "border-zinc-700 bg-zinc-900"
+                          isChecked ? "bg-[var(--accent)] border-[var(--accent)] text-[var(--paper)] font-bold" : "border-[var(--line-strong)] bg-[var(--surface)]"
                         }`}>
                           {isChecked && <Check className="w-3 h-3 stroke-[3]" />}
                         </div>
                         <div className="min-w-0">
                           <p className="font-medium text-xs truncate">{angle.title}</p>
-                          <p className="text-[11px] text-zinc-400 truncate mt-0.5">{angle.description}</p>
+                          <p className="text-[11px] text-[var(--ink-3)] truncate mt-0.5">{angle.description}</p>
                         </div>
                       </div>
 
-                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-white/[0.05] text-zinc-400 border border-white/[0.08] shrink-0 ml-3">
+                      <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-[var(--surface-3)] text-[var(--ink-3)] border border-[var(--line)] shrink-0 ml-3">
                         {formatScopeLabel(angle.source_scope)}
                       </span>
                     </div>
@@ -263,7 +263,7 @@ export default function PreflightModal({
 
           {/* User Guidance / Constraint Input */}
           <form onSubmit={handleTweakSubmit} className="space-y-2 pt-1">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 block font-semibold">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)] block font-semibold">
               Add specific guidance or constraints:
             </span>
             <div className="flex gap-2">
@@ -272,15 +272,15 @@ export default function PreflightModal({
                 value={userPromptTweak}
                 onChange={(e) => setUserPromptTweak(e.target.value)}
                 placeholder="e.g. Prioritize commercial viability and market readiness over theory..."
-                className="flex-1 bg-[#161822] border border-white/[0.08] focus:border-white/[0.22] rounded-lg px-3.5 py-2.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none font-sans"
+                className="flex-1 bg-[var(--surface-2)] border border-[var(--line)] focus:border-[var(--accent)] rounded-lg px-3.5 py-2.5 text-xs text-[var(--ink)] placeholder:text-[var(--ink-4)] focus:outline-none font-sans"
               />
               <button
                 type="submit"
                 disabled={!userPromptTweak.trim() || recalibrating}
-                className="px-4 py-2.5 bg-white/[0.06] hover:bg-white/[0.1] disabled:opacity-40 text-xs font-medium text-zinc-200 rounded-lg border border-white/[0.08] transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
+                className="px-4 py-2.5 bg-[var(--surface-3)] hover:bg-[var(--surface-2)] disabled:opacity-40 text-xs font-medium text-[var(--ink-2)] rounded-lg border border-[var(--line)] transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
               >
                 {recalibrating ? (
-                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-zinc-400" />
+                  <RefreshCw className="w-3.5 h-3.5 animate-spin text-[var(--ink-3)]" />
                 ) : (
                   <span>Update Plan</span>
                 )}
@@ -290,11 +290,11 @@ export default function PreflightModal({
         </div>
 
         {/* Modal Footer Actions */}
-        <div className="p-4 sm:p-5 border-t border-white/[0.08] flex items-center justify-between gap-3 bg-[#0d0e14]">
+        <div className="p-4 sm:p-5 border-t border-[var(--line)] flex items-center justify-between gap-3 bg-[var(--surface-2)]">
           <button
             type="button"
             onClick={onSkip}
-            className="text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
+            className="text-xs text-[var(--ink-3)] hover:text-[var(--ink)] transition-colors cursor-pointer"
           >
             Skip review, start now
           </button>
@@ -303,14 +303,14 @@ export default function PreflightModal({
             <button
               type="button"
               onClick={onClose}
-              className="px-3.5 py-2 text-xs text-zinc-400 hover:text-white transition-colors cursor-pointer"
+              className="px-3.5 py-2 text-xs text-[var(--ink-3)] hover:text-[var(--ink)] transition-colors cursor-pointer"
             >
               Cancel
             </button>
             <button
               type="button"
               onClick={handleLaunch}
-              className="px-5 py-2 bg-zinc-200 hover:bg-white text-zinc-950 font-semibold rounded-lg text-xs transition-all shadow-sm flex items-center gap-1.5 cursor-pointer"
+              className="btn-primary py-2 px-5 text-xs inline-flex items-center gap-1.5 cursor-pointer shadow-xs"
             >
               <span>Start Research</span>
               <ArrowRight className="w-3.5 h-3.5" />

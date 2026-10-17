@@ -30,7 +30,7 @@ Return ONLY a valid JSON object with EXACTLY this structure:
   "ambiguity_explanation": "Your query 'Ada' matches an internal research engine in your vault as well as the commercial AI customer support platform ada.cx on the public web.",
   "ambiguity_sources": {
     "vault": {
-      "doc_name": "Avadh_K_IIITM_Gwalior.pdf",
+      "doc_name": "Proprietary_Architecture_Spec.pdf",
       "snippet": "Autonomous multi-agent research engine built with Celery, Redis, Qdrant, Docker, FastEmbed"
     },
     "web": {
@@ -40,7 +40,7 @@ Return ONLY a valid JSON object with EXACTLY this structure:
     }
   },
   "clarification_options": [
-    { "id": "vault_focus", "title": "Internal Project from Vault", "description": "Investigate the multi-agent engine described in Avadh_K_IIITM_Gwalior.pdf" },
+    { "id": "vault_focus", "title": "Internal Project from Vault", "description": "Investigate the multi-agent engine described in Proprietary_Architecture_Spec.pdf" },
     { "id": "web_focus", "title": "Commercial Platform (ada.cx)", "description": "Investigate the commercial customer service AI automation company" },
     { "id": "compare_both", "title": "Compare & Contrast Both", "description": "Analyze both entities and highlight differences in system design" }
   ],
@@ -75,7 +75,8 @@ Return ONLY a valid JSON object with EXACTLY this structure:
 def evaluate_preflight_scope(
     query: str,
     vault_doc_names: Optional[List[str]] = None,
-    user_modification: Optional[str] = None
+    user_modification: Optional[str] = None,
+    user_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Evaluates research intent, detects entity ambiguity between private vault documents
@@ -90,7 +91,13 @@ def evaluate_preflight_scope(
         try:
             from engine.storage.vector_store import get_vector_store
             vs = get_vector_store()
-            matches = vs.search_user_docs(query, top_k=3, score_threshold=0.35, selected_docs=vault_doc_names)
+            matches = vs.search_user_docs(
+                query,
+                top_k=3,
+                score_threshold=0.35,
+                selected_docs=vault_doc_names,
+                user_id=user_id,
+            )
             if matches:
                 top_m = matches[0]
                 vault_doc_name = top_m.get("doc_name")
@@ -170,21 +177,21 @@ POTENTIAL PRIVATE VAULT MATCH FOUND:
                 "title": "System Architecture & Foundations",
                 "description": f"Core design, primary mechanics, and implementation of {query}.",
                 "source_scope": "Combined" if has_vault else "Public Web",
-                "enabled": true
+                "enabled": True
             },
             {
                 "id": 2,
                 "title": "Capabilities, Benchmarks & Metrics",
                 "description": f"Empirical performance, verification standards, and real-world benchmarks.",
                 "source_scope": "Combined" if has_vault else "Public Web",
-                "enabled": true
+                "enabled": True
             },
             {
                 "id": 3,
                 "title": "Comparative Analysis & Trade-offs",
                 "description": f"How {query} compares to prevailing alternatives and potential bottlenecks.",
                 "source_scope": "Public Web",
-                "enabled": true
+                "enabled": True
             }
         ],
         "estimated_duration_seconds": 35,

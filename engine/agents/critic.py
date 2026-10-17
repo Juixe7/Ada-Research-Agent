@@ -37,7 +37,8 @@ Return ONLY a valid JSON object with EXACTLY these keys:
 def audit_research_evidence(
     query: str,
     sub_tasks: List[Dict[str, Any]],
-    evidence_manifest: List[Dict[str, Any]]
+    evidence_manifest: List[Dict[str, Any]],
+    run_id: Optional[str] = None,
 ) -> Dict[str, Any]:
     """
     Audits the collective evidence manifest for knowledge gaps and factual contradictions.
@@ -72,7 +73,10 @@ Conduct an adversarial audit. Identify gaps, check for conflicting metrics or ti
         user_prompt=user_prompt,
         temperature=0.1,
         max_tokens=900,
-        json_mode=True
+        json_mode=True,
+        group="large",
+        run_id=run_id,
+        agent_name="critic",
     )
     if content:
         try:

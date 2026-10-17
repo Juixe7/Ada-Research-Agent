@@ -8,6 +8,7 @@
 *.key
 
 # Local Environments & Databases
+.local-run/
 .venv/
 venv/
 **/__pycache__/

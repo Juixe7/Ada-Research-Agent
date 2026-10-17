@@ -1,5 +1,9 @@
 import re
 import secrets
+import hashlib
+import os
+import smtplib
+from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import bcrypt
@@ -224,11 +228,15 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
         (User.email == clean_login) | (User.username == req.login.strip())
     ).first()
 
-    if not user:
-        raise HTTPException(
-            status_code=status.HTTP_404_NOT_FOUND,
-            detail="No account found matching this email or username."
-        )
+    # Do not reveal whether an account exists. Reset links are only issued over
+    # configured email; never return the token in the API response.
+    generic_response = {
+        "status": "ok",
+        "message": "If an account matches that address, a password reset link will be sent.",
+    }
+    public_app_url = os.getenv("PUBLIC_APP_URL", "").strip()
+    if not user or not os.getenv("SMTP_HOST") or not os.getenv("SMTP_FROM") or not public_app_url:
+        return generic_response
 
     # Invalidate any existing unused reset tokens for this user
     db.query(PasswordResetToken).filter(PasswordResetToken.user_id == user.id).delete()
@@ -238,25 +246,40 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)):
 
     token_record = PasswordResetToken(
         user_id=user.id,
-        token=reset_token,
+        token=hashlib.sha256(reset_token.encode("utf-8")).hexdigest(),
         expires_at=expires_at
     )
     db.add(token_record)
     db.commit()
-
-    return {
-        "status": "ok",
-        "message": "Reset token generated successfully. Valid for 15 minutes.",
-        "reset_token": reset_token,
-        "username": user.username,
-        "expires_in_minutes": 15
-    }
+    reset_url = f"{public_app_url.rstrip('/')}/reset-password?token={reset_token}"
+    message = EmailMessage()
+    message["Subject"] = "Reset your Ada Research password"
+    message["From"] = os.getenv("SMTP_FROM")
+    message["To"] = user.email
+    message.set_content(
+        f"A password reset was requested for your Ada Research account. "
+        f"The link expires in 15 minutes. If you did not request this, ignore this message.\n\n{reset_url}"
+    )
+    try:
+        host = os.environ["SMTP_HOST"]
+        port = int(os.getenv("SMTP_PORT", "587"))
+        with smtplib.SMTP(host, port, timeout=10) as smtp:
+            smtp.starttls()
+            if os.getenv("SMTP_USER"):
+                smtp.login(os.getenv("SMTP_USER", ""), os.getenv("SMTP_PASSWORD", ""))
+            smtp.send_message(message)
+    except Exception as exc:
+        db.query(PasswordResetToken).filter(PasswordResetToken.user_id == user.id).delete()
+        db.commit()
+        print(f"[auth] Password reset email delivery failed: {type(exc).__name__}")
+    return generic_response
 
 @auth_router.post("/reset-password")
 def reset_password(req: ResetPasswordRequest, db: Session = Depends(get_db)):
     clean_token = req.token.strip()
+    token_hash = hashlib.sha256(clean_token.encode("utf-8")).hexdigest()
     token_record = db.query(PasswordResetToken).filter(
-        PasswordResetToken.token == clean_token
+        PasswordResetToken.token == token_hash
     ).first()
 
     if not token_record:
