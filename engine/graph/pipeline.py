@@ -1,3 +1,7 @@
+"""Constructs and executes the LangGraph research pipeline.
+
+"""
+
 import os
 from typing import Dict, Any, Optional
 from langgraph.graph import StateGraph, START, END
@@ -19,7 +23,17 @@ from engine.graph.edges import route_after_research, route_critic
 
 def build_research_graph():
     """
-    Constructs and compiles the production LangGraph StateGraph (Blueprint Section 7.2).
+    Construct and compile the reusable LangGraph research workflow.
+
+    Args:
+        None. Node behavior and conditional routing are bound at module level.
+
+    Returns:
+        A compiled graph accepting `RunState` inputs and returning its final state.
+
+    Failure behavior:
+        Graph construction errors from LangGraph or invalid node/edge definitions
+        propagate during import; they are not converted into an empty graph.
     """
     builder = StateGraph(RunState)
 
@@ -85,7 +99,26 @@ def execute_graph_pipeline(
     blocked_domains: Optional[list] = None,
 ) -> Dict[str, Any]:
     """
-    Executes the compiled LangGraph pipeline for a deep research run.
+    Execute the compiled graph for one research question.
+
+    Args:
+        query: User's research question.
+        depth: Research depth; `deep` allows up to two research rounds.
+        include_user_docs: Whether private vault evidence is eligible.
+        report_id: Stable external run/report identifier, generated if omitted.
+        selected_docs: Optional document names eligible for retrieval.
+        custom_angles: User-supplied research angles to include in planning.
+        clarification_choice: Optional selected answer to a preflight question.
+        user_id: Owner identity used to scope private document retrieval.
+        blocked_domains: Domains excluded from web search.
+
+    Returns:
+        The final `RunState` as a dictionary, including report, evidence,
+        warnings, scores and artifact metadata populated by completed nodes.
+
+    Failure behavior:
+        Unhandled node, provider, and persistence exceptions propagate to the
+        task boundary, which records run failure where possible.
     """
     initial_state: RunState = {
         "run_id": report_id or f"run_{os.urandom(4).hex()}",

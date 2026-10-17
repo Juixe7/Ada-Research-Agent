@@ -1,3 +1,7 @@
+"""Condenses prior session turns into bounded context for incremental research.
+
+"""
+
 import json
 import re
 from typing import List, Dict, Any, Optional

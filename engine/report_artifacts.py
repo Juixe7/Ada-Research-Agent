@@ -1,3 +1,7 @@
+"""Checks whether a research run has a usable persisted report artifact.
+
+"""
+
 from pathlib import Path
 from typing import Optional
 

@@ -1,3 +1,7 @@
+"""FastAPI application, API routes, request schemas, dispatch logic, and resource access checks.
+
+"""
+
 import os
 import re
 import json
@@ -137,6 +141,20 @@ def has_report_artifact(report_id: str, report_json_path: Optional[str] = None) 
 
 
 def require_vault_document(doc_name: str, user: User, db: Session) -> VaultDocument:
+    """Load a vault document only when it belongs to the authenticated user.
+
+    Args:
+        doc_name: User-visible stored filename/document key.
+        user: Authenticated owner requesting the resource.
+        db: Active SQLAlchemy session.
+
+    Returns:
+        The matching `VaultDocument` row.
+
+    Raises:
+        HTTPException: 404 when absent or owned by another user, avoiding
+        disclosure that another account has uploaded the document.
+    """
     safe_doc = sanitize_filename(doc_name)
     doc = db.query(VaultDocument).filter(
         VaultDocument.user_id == user.id,
@@ -148,6 +166,7 @@ def require_vault_document(doc_name: str, user: User, db: Session) -> VaultDocum
 
 
 class PreflightRequest(BaseModel):
+    """Request payload for query scoping before starting a run."""
     query: str = Field(..., min_length=1, max_length=2000)
     depth: str = "deep"
     include_user_docs: bool = True
@@ -156,6 +175,7 @@ class PreflightRequest(BaseModel):
 
 
 class ResearchRequest(BaseModel):
+    """Validated configuration for an asynchronous research run."""
     query: str = Field(..., min_length=1, max_length=2000)
     depth: str = "deep"  # "quick" | "deep"
     include_user_docs: bool = True
@@ -167,21 +187,25 @@ class ResearchRequest(BaseModel):
 
 
 class PasteDocRequest(BaseModel):
+    """Title and text for a pasted vault document."""
     title: str = Field(..., min_length=1, max_length=255)
     text: str = Field(..., min_length=1, max_length=20 * 1024 * 1024)
 
 
 class QuerySelectionRequest(BaseModel):
+    """Selected report text plus a question about it."""
     selected_text: str = Field(..., min_length=1, max_length=500)
     question: str = Field(..., min_length=1, max_length=1000)
 
 
 class ReportFollowupRequest(BaseModel):
+    """Evidence-grounded follow-up question for a report."""
     question: str = Field(..., min_length=1, max_length=1000)
     selected_text: Optional[str] = Field("", max_length=500)
 
 
 class AddendumRequest(BaseModel):
+    """Inquiry and context for a report addendum investigation."""
     inquiry: str = Field(..., min_length=1, max_length=1000)
     selected_text: Optional[str] = Field("", max_length=500)
     context: Optional[str] = Field("", max_length=2000)
@@ -191,12 +215,14 @@ SubInvestigationRequest = AddendumRequest
 
 
 class QuerySourceRequest(BaseModel):
+    """Question constrained to a source in the report manifest."""
     source_id: str = Field(..., min_length=1, max_length=20)
     question: str = Field(..., min_length=1, max_length=1000)
 
 
 @app.get("/health")
 def health():
+    """Return a lightweight process liveness response; does not probe dependencies."""
     return {"status": "ok", "service": "ada-deep-research", "engine": "modular-multi-agent"}
 
 
@@ -469,6 +495,18 @@ def cancel_research_job(report_id: str, user: User = Depends(get_current_user), 
 
 
 def enrich_dossier_inquiries(data: Dict[str, Any]) -> Dict[str, Any]:
+    """Add inquiry suggestions when a completed report lacks them.
+
+    Args:
+        data: Persisted report payload, potentially containing inquiry data.
+
+    Returns:
+        The same mutable report mapping with suggestions populated when needed.
+
+    Failure behavior:
+        The helper may use a deterministic fallback if optional model
+        enrichment fails; malformed non-mapping input is outside its contract.
+    """
     if not isinstance(data, dict):
         return data
     if not data.get("suggested_inquiries"):

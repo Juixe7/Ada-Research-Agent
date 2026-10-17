@@ -1,3 +1,7 @@
+"""Celery application setup, broker configuration, and shared research-job state helpers.
+
+"""
+
 from __future__ import annotations
 import json
 from typing import Dict, Any, Optional
@@ -41,8 +45,11 @@ try:
     )
 except ImportError:
     class DummyCelery:
+        """Minimal decorator shim that keeps local non-Celery imports usable."""
         def task(self, *args, **kwargs):
+            """Return a no-op task decorator preserving the original function."""
             def decorator(f):
+                """Leave a callable unchanged when Celery is not installed."""
                 return f
             return decorator
     celery_app = DummyCelery()

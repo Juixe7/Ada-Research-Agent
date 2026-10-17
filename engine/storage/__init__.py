@@ -3,7 +3,15 @@ Storage and Vector DB abstractions for Ada Deep Research.
 """
 from engine.storage.relational_store import RelationalStore
 
-def get_vector_store():
+def get_vector_store() -> "AdaVectorStore":
+    """Return the shared Qdrant vector-store instance.
+
+    Returns:
+        Initialized `AdaVectorStore` singleton.
+
+    Raises:
+        RuntimeError: When persistent vector storage or embeddings cannot start.
+    """
     from engine.storage.vector_store import get_vector_store as _gvs
     return _gvs()
 

@@ -1,3 +1,7 @@
+"""Repository methods for persisting and querying normalized research entities.
+
+"""
+
 import json
 import re
 import uuid
@@ -22,6 +26,11 @@ class RelationalStore:
 
     @staticmethod
     def get_session() -> Session:
+        """Open a new SQLAlchemy session for one repository operation.
+
+        Returns:
+            A session bound to `SessionLocal`; the caller owns and must close it.
+        """
         return SessionLocal()
 
     @classmethod
@@ -384,6 +393,17 @@ class RelationalStore:
 
     @classmethod
     def get_run_cost(cls, run_id: str) -> float:
+        """Return the persisted estimated provider cost accumulated by a run.
+
+        Args:
+            run_id: Stable run identifier.
+
+        Returns:
+            Sum of recorded call costs, or zero when no cost rows exist.
+
+        Failure behavior:
+            Database query failures propagate to the caller.
+        """
         db = cls.get_session()
         try:
             from sqlalchemy import func
@@ -394,6 +414,17 @@ class RelationalStore:
 
     @classmethod
     def get_run_usage(cls, run_id: str) -> Dict[str, int]:
+        """Return aggregate input/output token counts for a research run.
+
+        Args:
+            run_id: Stable run identifier.
+
+        Returns:
+            Mapping with `tokens_in` and `tokens_out` integer totals.
+
+        Failure behavior:
+            Database query failures propagate to the caller.
+        """
         db = cls.get_session()
         try:
             from sqlalchemy import func

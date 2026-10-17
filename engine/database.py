@@ -1,6 +1,11 @@
+"""Implementation of the database subsystem in Ada Research Agent.
+
+"""
+
 import os
+from typing import Generator
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import declarative_base, sessionmaker
+from sqlalchemy.orm import Session, declarative_base, sessionmaker
 from engine.config import DATABASE_URL
 
 # Normalize postgres:// to postgresql:// for SQLAlchemy compatibility
@@ -29,6 +34,7 @@ engine = create_engine(
 if db_url.startswith("sqlite"):
     @event.listens_for(engine, "connect")
     def set_sqlite_pragma(dbapi_connection, connection_record):
+        """Enable WAL and normal synchronous mode on each SQLite connection."""
         cursor = dbapi_connection.cursor()
         cursor.execute("PRAGMA journal_mode=WAL")
         cursor.execute("PRAGMA synchronous=NORMAL")
@@ -37,15 +43,31 @@ if db_url.startswith("sqlite"):
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, expire_on_commit=False, bind=engine)
 Base = declarative_base()
 
-def get_db():
-    """FastAPI dependency yielding a database session."""
+def get_db() -> Generator[Session, None, None]:
+    """Yield a request-scoped SQLAlchemy session and always close it.
+
+    Yields:
+        An ORM session bound to the configured engine.
+
+    Failure behavior:
+        Connection/transaction errors propagate to the caller; session closure
+        still runs in the dependency cleanup path.
+    """
     db = SessionLocal()
     try:
         yield db
     finally:
         db.close()
 
-def init_db():
-    """Create all tables defined in models."""
+def init_db() -> None:
+    """Create tables for the currently imported SQLAlchemy models.
+
+    Returns:
+        `None` after metadata creation succeeds.
+
+    Failure behavior:
+        Database connection or DDL errors propagate during application startup.
+        This helper does not perform schema migrations.
+    """
     from engine import models  # noqa: F401
     Base.metadata.create_all(bind=engine)

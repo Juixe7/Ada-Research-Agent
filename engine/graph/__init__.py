@@ -1,3 +1,7 @@
+"""Lazy exports for graph pipeline construction and invocation.
+
+"""
+
 from engine.graph.state import RunState, SectionSpec
 
 __all__ = [

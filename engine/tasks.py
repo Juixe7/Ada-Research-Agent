@@ -1,3 +1,7 @@
+"""Synchronous research orchestration and Celery task entry points.
+
+"""
+
 import os
 import concurrent.futures
 import hashlib

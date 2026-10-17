@@ -1,3 +1,7 @@
+"""Builds report outlines, writes evidence-assigned sections, and assembles the final dossier.
+
+"""
+
 import re
 import html
 from typing import List, Dict, Any, Optional

@@ -1,3 +1,7 @@
+"""Formats an evidence manifest and generates a structured research dossier.
+
+"""
+
 import os
 import re
 import html

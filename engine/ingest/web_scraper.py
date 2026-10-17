@@ -1,3 +1,7 @@
+"""Validates public URLs and retrieves bounded webpage content for research evidence.
+
+"""
+
 import time
 import re
 import socket

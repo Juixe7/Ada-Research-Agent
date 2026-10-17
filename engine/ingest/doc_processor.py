@@ -1,3 +1,7 @@
+"""Extracts supported document formats and chunks text with page and heading metadata.
+
+"""
+
 import re
 import uuid
 import csv
@@ -11,6 +15,8 @@ import pymupdf
 
 
 class DocumentChunk:
+    """Serializable text passage with source, location, and section metadata."""
+
     def __init__(
         self,
         chunk_id: str,
@@ -20,6 +26,17 @@ class DocumentChunk:
         char_count: int,
         metadata: Optional[Dict[str, Any]] = None,
     ):
+        """Build a parsed document chunk.
+
+        Args:
+            chunk_id: Stable identifier for this passage.
+            doc_name: Original sanitized source-document name.
+            page_number: One-based source page, or the parser's document-level
+                page marker when the format has no pages.
+            text: Passage text used for retrieval.
+            char_count: Character count for the stored passage.
+            metadata: Optional section/chunk metadata copied into serialization.
+        """
         self.chunk_id = chunk_id
         self.doc_name = doc_name
         self.page_number = page_number
@@ -28,6 +45,7 @@ class DocumentChunk:
         self.metadata = metadata or {}
 
     def to_dict(self) -> Dict[str, Any]:
+        """Serialize the chunk into the retrieval payload shape."""
         return {
             "chunk_id": self.chunk_id,
             "doc_name": self.doc_name,
@@ -214,6 +232,7 @@ def chunk_text_with_metadata(
     current_body = ""
 
     def flush() -> None:
+        """Append the current non-empty chunk with its section/page metadata."""
         nonlocal current_body
         if not current_body.strip():
             return

@@ -1,3 +1,7 @@
+"""Per-track web search, page retrieval, and iterative evidence gathering.
+
+"""
+
 import json
 import time
 import requests
@@ -12,6 +16,7 @@ def calculate_domain_authority(domain: str) -> float:
     domain_lower = (domain or "").lower().split(":", 1)[0].strip(".")
 
     def matches_domain(root: str) -> bool:
+        """Return whether the normalized hostname equals or belongs to a root."""
         return domain_lower == root or domain_lower.endswith("." + root)
 
     if domain_lower.endswith((".gov", ".edu", ".ac.uk")) or any(matches_domain(root) for root in ["arxiv.org", "nature.com", "science.org", "sciencedirect.com", "ieee.org", "springer.com"]):

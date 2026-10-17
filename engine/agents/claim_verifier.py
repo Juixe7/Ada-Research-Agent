@@ -1,3 +1,7 @@
+"""Structured claim-support and track-relevance audits over retrieved evidence.
+
+"""
+
 from typing import Any, Dict, List, Literal, Optional
 
 from pydantic import BaseModel, Field
@@ -6,22 +10,26 @@ from engine.agents.llm_resilient import call_gateway
 
 
 class ClaimVerdict(BaseModel):
+    """Structured decision about whether evidence supports a report claim."""
     claim_id: int
     verdict: Literal["supported", "partial", "unsupported"]
     reason: str = Field(max_length=500)
 
 
 class ClaimAudit(BaseModel):
+    """Collection of claim-level verification results."""
     claims: List[ClaimVerdict]
 
 
 class TrackRelevance(BaseModel):
+    """Structured relevance decision for evidence on a research track."""
     track_id: str
     score: float = Field(ge=0.0, le=1.0)
     reason: str = Field(max_length=300)
 
 
 class RelevanceAudit(BaseModel):
+    """Collection of evidence relevance decisions for a track."""
     tracks: List[TrackRelevance]
 
 

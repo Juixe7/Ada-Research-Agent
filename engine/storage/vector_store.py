@@ -1,3 +1,7 @@
+"""Qdrant and FastEmbed operations for owner-scoped document indexing and retrieval.
+
+"""
+
 import os
 import uuid
 import threading
@@ -14,7 +18,17 @@ class AdaVectorStore:
     Supports remote Qdrant microservice or Qdrant Cloud (QDRANT_URL + QDRANT_API_KEY)
     and embedded local storage in standalone dev.
     """
-    def __init__(self, collection_name: str = QDRANT_COLLECTION):
+    def __init__(self, collection_name: str = QDRANT_COLLECTION) -> None:
+        """Initialize embeddings and connect to remote or durable local Qdrant.
+
+        Args:
+            collection_name: Collection to create or open.
+
+        Raises:
+            RuntimeError: When persistent Qdrant storage/collection cannot be
+                initialized. The store deliberately does not fall back to an
+                empty in-memory database.
+        """
         self.collection_name = collection_name
         self.vector_size = 384  # bge-small-en-v1.5 dimension
         
@@ -318,6 +332,14 @@ _store_instance = None
 _store_lock = threading.Lock()
 
 def get_vector_store() -> AdaVectorStore:
+    """Return the process-wide vector-store instance, creating it on first use.
+
+    Returns:
+        Initialized `AdaVectorStore` singleton.
+
+    Raises:
+        RuntimeError: If Qdrant or the embedding model cannot initialize.
+    """
     global _store_instance
     if _store_instance is None:
         with _store_lock:

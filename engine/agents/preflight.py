@@ -1,3 +1,7 @@
+"""Checks question scope and prepares clarifying guidance before research dispatch.
+
+"""
+
 import json
 import re
 import time

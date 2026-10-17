@@ -1,3 +1,7 @@
+"""Validates generated report citations against the run evidence manifest.
+
+"""
+
 import re
 from typing import List, Dict, Any, Optional
 

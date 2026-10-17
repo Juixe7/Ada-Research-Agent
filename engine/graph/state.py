@@ -1,6 +1,11 @@
+"""Typed state schema shared by nodes in the research graph.
+
+"""
+
 from typing import TypedDict, List, Dict, Any, Optional
 
 class SectionSpec(TypedDict):
+    """Typed specification of one report section and its assigned sources."""
     id: str
     title: str
     goal: str
@@ -8,6 +13,7 @@ class SectionSpec(TypedDict):
     deterministic_tables: Optional[str]
 
 class RunState(TypedDict):
+    """Shared state contract passed between research graph nodes."""
     run_id: str
     query: str
     settings: Dict[str, Any]
