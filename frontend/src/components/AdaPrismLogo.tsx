@@ -70,11 +70,11 @@ export default function AdaPrismLogo({
         <div className="flex flex-col justify-center leading-none">
           <div className="flex items-baseline gap-2">
             <span
-              className={`font-serif font-bold tracking-tight text-[#f4f4f5] ${textSizes[size]}`}
+              className={`font-serif font-bold tracking-tight text-[var(--ink)] ${textSizes[size]}`}
             >
               Ada
             </span>
-            <span className="text-[11px] font-sans font-semibold tracking-wide text-zinc-400">
+              <span className="text-[11px] font-sans font-semibold tracking-wide text-[var(--ink-3)]">
               Research
             </span>
           </div>

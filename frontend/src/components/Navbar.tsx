@@ -2,8 +2,9 @@
 
 import { useState, useRef, useEffect } from "react";
 import { usePathname } from "next/navigation";
+import Link from "next/link";
 import { 
-  FolderArchive, Settings, ChevronDown, Plus, LogOut
+  FolderArchive, Settings, ChevronDown, Plus, LogOut, Menu, X
 } from "lucide-react";
 import { useAuth } from "@/context/AuthContext";
 import AdaPrismLogo from "@/components/AdaPrismLogo";
@@ -12,7 +13,13 @@ export default function Navbar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
   const [dropdownOpen, setDropdownOpen] = useState(false);
+  const [mobileNavOpen, setMobileNavOpen] = useState(false);
   const dropdownRef = useRef<HTMLDivElement>(null);
+
+  useEffect(() => {
+    setDropdownOpen(false);
+    setMobileNavOpen(false);
+  }, [pathname]);
 
   // Close dropdown on outside click
   useEffect(() => {
@@ -27,9 +34,9 @@ export default function Navbar() {
 
   const navLinks = user ? [
     { href: "/dashboard", label: "Dashboard" },
-    { href: "/studio",    label: "Studio" },
-    { href: "/vault",     label: "Vault" },
-    { href: "/history",   label: "Dossiers" },
+    { href: "/studio",    label: "Research" },
+    { href: "/vault",     label: "Library" },
+    { href: "/history",   label: "History" },
   ] : [
     { href: "/#features",     label: "Features" },
     { href: "/#how-it-works", label: "How It Works" },
@@ -37,36 +44,38 @@ export default function Navbar() {
   ];
 
   return (
-    <header className="sticky top-0 z-40 w-full border-b border-white/[0.08] bg-[#0c0d12]/90 backdrop-blur-md transition-all">
-      <nav className="mx-auto flex h-20 max-w-6xl items-center justify-between px-6 sm:px-8">
+    <header className="sticky top-0 z-40 w-full border-b border-[var(--line)] bg-[var(--paper)] transition-colors">
+      <nav className="relative mx-auto flex h-16 max-w-6xl items-center justify-between px-4 sm:px-8">
         {/* Brand Wordmark with Generous Presence */}
-        <div className="flex items-center gap-10">
-          <a
+        <div className="flex items-center gap-8">
+          <Link
             href={user ? "/dashboard" : "/"}
             className="group flex items-center transition-opacity hover:opacity-90 focus:outline-none"
-            aria-label="Ada Research"
+            aria-label="Ada Research Desk"
           >
-            <AdaPrismLogo size="md" showWordmark={true} />
-          </a>
+            <AdaPrismLogo size="sm" showWordmark={true} />
+          </Link>
 
           {/* Navigation Links */}
-          <div className="hidden md:flex items-center gap-2">
+          <div className="hidden md:flex items-center gap-1.5">
             {navLinks.map(({ href, label }) => {
               const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
               return (
-                <a
+                <Link
                   key={href}
                   href={href}
+                  aria-current={isActive ? "page" : undefined}
+                  onClick={() => setMobileNavOpen(false)}
                   className={`
-                    px-3.5 py-2 rounded-lg text-xs font-medium transition-all
+                    px-3 py-1.5 rounded-[6px] text-xs font-medium transition-all
                     ${isActive
-                      ? "text-zinc-100 bg-white/[0.08] font-semibold border border-white/[0.12]"
-                      : "text-zinc-400 hover:text-zinc-100 hover:bg-white/[0.04]"
+                      ? "text-[var(--ink)] bg-[var(--surface-2)] font-semibold border border-[var(--line)]"
+                      : "text-[var(--ink-2)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)]"
                     }
                   `}
                 >
                   {label}
-                </a>
+                </Link>
               );
             })}
           </div>
@@ -77,54 +86,55 @@ export default function Navbar() {
           {user ? (
             <>
               {/* Quick Launch Button */}
-              <a
+              <Link
                 href="/studio"
-                className="hidden sm:inline-flex items-center gap-1.5 px-3.5 py-2 rounded-lg bg-zinc-200 hover:bg-white text-zinc-950 font-medium text-xs transition-all cursor-pointer shadow-sm"
+                className="btn-primary"
+                aria-label="Start new research"
               >
-                <Plus className="w-3.5 h-3.5 text-zinc-950" />
-                <span>New Research</span>
-              </a>
+                <Plus className="w-3.5 h-3.5" />
+                <span className="hidden sm:inline">New research</span>
+              </Link>
 
               {/* User Avatar Menu */}
               <div className="relative" ref={dropdownRef}>
                 <button
                   type="button"
                   onClick={() => setDropdownOpen(!dropdownOpen)}
-                  className="flex items-center gap-2.5 p-1.5 rounded-lg hover:bg-white/[0.06] border border-transparent hover:border-white/[0.08] transition-all cursor-pointer"
+                  className="flex items-center gap-2 p-1 rounded-[6px] hover:bg-[var(--surface-2)] border border-transparent hover:border-[var(--line)] transition-all cursor-pointer"
                 >
-                  <div className="w-7 h-7 rounded-full bg-[#161822] border border-white/[0.12] text-zinc-300 text-xs font-mono font-medium flex items-center justify-center">
+                  <div className="w-6 h-6 rounded-full bg-[var(--accent-soft)] text-[var(--accent)] text-xs font-mono font-medium flex items-center justify-center">
                     {user.username.charAt(0).toUpperCase()}
                   </div>
-                  <span className="hidden sm:inline text-xs text-zinc-300 font-medium max-w-[120px] truncate">
+                  <span className="hidden sm:inline text-xs text-[var(--ink-2)] font-medium max-w-[120px] truncate">
                     {user.username}
                   </span>
-                  <ChevronDown className="w-3.5 h-3.5 text-zinc-500" />
+                  <ChevronDown className="w-3.5 h-3.5 text-[var(--ink-3)]" />
                 </button>
 
                 {dropdownOpen && (
-                  <div className="absolute right-0 mt-2 w-56 rounded-xl bg-[#14151a] border border-white/[0.1] shadow-2xl p-1.5 space-y-1 backdrop-blur-xl animate-in fade-in zoom-in-95 duration-100 z-50">
-                    <div className="px-3 py-2 border-b border-white/[0.06]">
-                      <p className="text-xs font-semibold text-zinc-100 truncate">{user.username}</p>
-                      <p className="text-[11px] text-zinc-400 font-mono truncate">{user.email}</p>
+                  <div className="absolute right-0 mt-2 w-56 rounded-[10px] bg-[var(--surface)] border border-[var(--line-strong)] shadow-xl p-1.5 space-y-1 animate-in fade-in zoom-in-95 duration-100 z-50 text-[var(--ink)]">
+                    <div className="px-3 py-2 border-b border-[var(--line)]">
+                      <p className="text-xs font-semibold text-[var(--ink)] truncate">{user.username}</p>
+                      <p className="text-[11px] text-[var(--ink-3)] font-mono truncate">{user.email}</p>
                     </div>
 
-                    <a
+                    <Link
                       href="/settings"
                       onClick={() => setDropdownOpen(false)}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-white/[0.06] transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 rounded-[6px] text-xs text-[var(--ink-2)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors"
                     >
-                      <Settings className="w-3.5 h-3.5 text-zinc-400" />
+                      <Settings className="w-3.5 h-3.5 text-[var(--accent)]" />
                       <span>Account Settings</span>
-                    </a>
+                    </Link>
 
-                    <a
+                    <Link
                       href="/vault"
                       onClick={() => setDropdownOpen(false)}
-                      className="flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-zinc-300 hover:text-white hover:bg-white/[0.06] transition-colors"
+                      className="flex items-center gap-2 px-3 py-2 rounded-[6px] text-xs text-[var(--ink-2)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors"
                     >
-                      <FolderArchive className="w-3.5 h-3.5 text-zinc-400" />
-                      <span>Knowledge Vault</span>
-                    </a>
+                      <FolderArchive className="w-3.5 h-3.5 text-[var(--accent)]" />
+                      <span>Source library</span>
+                    </Link>
 
                     <button
                       type="button"
@@ -132,7 +142,7 @@ export default function Navbar() {
                         setDropdownOpen(false);
                         logout();
                       }}
-                      className="w-full flex items-center gap-2 px-3 py-2 rounded-lg text-xs text-red-400 hover:text-red-300 hover:bg-red-500/10 transition-colors cursor-pointer"
+                      className="w-full flex items-center gap-2 px-3 py-2 rounded-[6px] text-xs text-[var(--bad)] hover:bg-[var(--bad-soft)] transition-colors cursor-pointer"
                     >
                       <LogOut className="w-3.5 h-3.5" />
                       <span>Sign Out</span>
@@ -143,21 +153,53 @@ export default function Navbar() {
             </>
           ) : (
             <>
-              <a
+              <Link
                 href="/login"
-                className="px-3.5 py-2 rounded-lg text-xs font-medium text-zinc-300 hover:text-white hover:bg-white/[0.05] transition-colors"
+                className="px-3.5 py-1.5 rounded-[6px] text-xs font-medium text-[var(--ink-2)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors"
               >
                 Sign In
-              </a>
-              <a
+              </Link>
+              <Link
                 href="/register"
-                className="bg-zinc-200 hover:bg-white text-zinc-950 font-semibold text-xs px-4 py-2 rounded-lg shadow-sm transition-all"
+                className="btn-primary text-xs px-3.5 py-1.5 rounded-[6px] shadow-xs"
               >
                 Get Started
-              </a>
+              </Link>
             </>
           )}
+
+          <button
+            type="button"
+            onClick={() => setMobileNavOpen((open) => !open)}
+            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] md:hidden"
+            aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"}
+            aria-expanded={mobileNavOpen}
+            aria-controls="mobile-primary-navigation"
+          >
+            {mobileNavOpen ? <X className="h-4 w-4" /> : <Menu className="h-4 w-4" />}
+          </button>
         </div>
+
+        {mobileNavOpen && (
+          <div id="mobile-primary-navigation" className="absolute left-0 right-0 top-16 z-50 border-b border-[var(--line)] bg-[var(--surface)] p-3 shadow-lg md:hidden">
+            <div className="mx-auto flex max-w-6xl flex-col gap-1">
+              {navLinks.map(({ href, label }) => {
+                const isActive = pathname === href || (href !== "/" && pathname.startsWith(href));
+                return (
+                  <Link
+                    key={href}
+                    href={href}
+                    aria-current={isActive ? "page" : undefined}
+                    onClick={() => setMobileNavOpen(false)}
+                    className={`rounded-md px-3 py-2.5 text-sm transition-colors ${isActive ? "bg-[var(--accent-soft)] font-medium text-[var(--accent)]" : "text-[var(--ink-2)] hover:bg-[var(--surface-2)] hover:text-[var(--ink)]"}`}
+                  >
+                    {label}
+                  </Link>
+                );
+              })}
+            </div>
+          </div>
+        )}
       </nav>
     </header>
   );

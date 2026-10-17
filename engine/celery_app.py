@@ -1,29 +1,51 @@
+from __future__ import annotations
 import json
 from typing import Dict, Any, Optional
-from celery import Celery
-import redis
+try:
+    import redis
+except ImportError:
+    redis = None
 from engine.config import REDIS_URL
+try:
+    from celery import Celery
+    # Initialize Celery application backed by Redis broker and result backend
+    celery_app = Celery(
+        "ada_deep_research",
+        broker=REDIS_URL,
+        backend=REDIS_URL,
+        include=["engine.tasks"]
+    )
 
-# Initialize Celery application backed by Redis broker and result backend
-celery_app = Celery(
-    "ada_deep_research",
-    broker=REDIS_URL,
-    backend=REDIS_URL,
-    include=["engine.tasks"]
-)
-
-celery_app.conf.update(
-    task_serializer="json",
-    accept_content=["json"],
-    result_serializer="json",
-    timezone="UTC",
-    enable_utc=True,
-    task_track_started=True,
-    worker_prefetch_multiplier=1,      # Prevent a single thread from hoarding long research tasks
-    task_acks_late=True,               # Acknowledge task only after completion for crash resilience
-    result_expires=86400,              # Expire task metadata after 24 hours
-    broker_connection_retry_on_startup=True,
-)
+    celery_app.conf.update(
+        task_serializer="json",
+        accept_content=["json"],
+        result_serializer="json",
+        timezone="UTC",
+        enable_utc=True,
+        task_track_started=True,
+        worker_prefetch_multiplier=1,      # Prevent a single thread from hoarding long research tasks
+        task_acks_late=True,               # Acknowledge task only after completion for crash resilience
+        result_expires=86400,              # Expire task metadata after 24 hours
+        broker_connection_retry_on_startup=True,
+        task_default_queue="orchestrate",
+        task_queues={
+            "orchestrate": {"exchange": "orchestrate", "routing_key": "orchestrate"},
+            "research": {"exchange": "research", "routing_key": "research"},
+            "ingest": {"exchange": "ingest", "routing_key": "ingest"},
+        },
+        task_routes={
+            "ada.run_research_pipeline": {"queue": "orchestrate"},
+            "ada.execute_sub_research": {"queue": "research"},
+            "ada.ingest_document": {"queue": "ingest"},
+        }
+    )
+except ImportError:
+    class DummyCelery:
+        def task(self, *args, **kwargs):
+            def decorator(f):
+                return f
+            return decorator
+    celery_app = DummyCelery()
 
 # ── Shared Redis + In-Memory Ephemeral Job State Store ──
 _redis_client: Optional[redis.Redis] = None

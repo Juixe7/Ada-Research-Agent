@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import { useState, useEffect, useRef } from "react";
 import { 
   Layers, Database, ArrowRight, ArrowDown,
   Globe, Zap, Terminal, CheckCircle2, ShieldCheck, Code
@@ -18,6 +18,12 @@ interface PipelineNode {
   outputs: string[];
   resiliency: string;
   codeSnippet: string;
+}
+
+interface BackendStatus {
+  status?: string;
+  service?: string;
+  engine?: string;
 }
 
 const PIPELINE_NODES: PipelineNode[] = [
@@ -100,23 +106,25 @@ const PIPELINE_NODES: PipelineNode[] = [
     return call_gemini_with_fallback(payload)`
   },
   {
-    id: "hallucination",
-    name: "06. Post-Synthesis Claim Verifier",
-    role: "NLI Contradiction Filtering",
-    modelOrTech: "Entailment Verification Matrix",
-    description: "Performs sentence-level Natural Language Inference (NLI) between synthesized text and the raw source passages. Flags or rewrites uncorroborated statistical claims.",
-    inputs: ["Draft Monograph", "Evidence Passages"],
-    outputs: ["Faithfulness Score", "Corroborated Monograph"],
-    resiliency: "Heuristic claim sentence isolation with regex fallback if NLI model fails.",
-    codeSnippet: `def verify_claims_faithfulness(draft, evidence):
-    # Cross-reference claims against source passages
-    return {"cleaned_markdown": cleaned_md, "faithfulness_score": faithfulness}`
+    id: "citations",
+    name: "06. Citation Reference Guard",
+    role: "Deterministic Citation ID Validation",
+    modelOrTech: "Regex + Retrieved Evidence Manifest",
+    description: "Checks that [S#] and [D#] citation IDs exist in the retrieved evidence manifest. It removes lines supported only by unknown IDs and reports reference validity; it does not evaluate claim entailment.",
+    inputs: ["Draft Monograph", "Retrieved Evidence Manifest"],
+    outputs: ["Citation Index", "Unmatched Citation IDs", "Cleaned Monograph"],
+    resiliency: "Runs deterministically without an external model. Citation presence is not treated as proof that a source supports a claim.",
+    codeSnippet: `def verify_and_ground_citations(report_markdown, evidence_manifest):
+    # Resolve citation IDs against retrieved source IDs
+    return {"citation_index": citation_index, "cleaned_markdown": cleaned_markdown}`
   }
 ];
 
 export default function ArchitecturePage() {
   const [selectedNode, setSelectedNode] = useState<PipelineNode>(PIPELINE_NODES[0]);
-  const [backendStatus, setBackendStatus] = useState<any>(null);
+  const [backendStatus, setBackendStatus] = useState<BackendStatus | null>(null);
+  const stageButtons = useRef<Array<HTMLButtonElement | null>>([]);
+  const selectedIndex = Math.max(0, PIPELINE_NODES.findIndex((node) => node.id === selectedNode.id));
 
   useEffect(() => {
     fetch(`${API_URL}/health`)
@@ -126,51 +134,51 @@ export default function ArchitecturePage() {
   }, []);
 
   return (
-    <div className="min-h-screen bg-[#0a0b0d] text-zinc-100 flex flex-col font-sans">
+    <div className="min-h-screen bg-[var(--paper)] text-[var(--ink)] flex flex-col font-sans selection:bg-[var(--accent-soft)]">
       <Navbar />
 
-      <main className="flex-1 max-w-6xl w-full mx-auto px-5 py-10 md:py-16 space-y-12">
+      <main className="flex-1 max-w-6xl w-full mx-auto px-5 py-10 md:py-16 space-y-10">
         {/* Header */}
         <div className="text-center space-y-3 max-w-2xl mx-auto">
-          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-white/[0.05] border border-white/[0.08] text-zinc-300 text-[11px] font-mono tracking-wider uppercase">
-            <Layers className="w-3.5 h-3.5 text-zinc-400" />
-            System Blueprint & Execution Graph
+          <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--line)] text-[var(--ink-2)] text-[11px] font-mono tracking-wider uppercase">
+            <Layers className="w-3.5 h-3.5 text-[var(--accent)]" />
+            <span>System Blueprint & Execution Graph</span>
           </div>
-          <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-bold text-zinc-100 tracking-tight">
+          <h1 className="text-3xl sm:text-4xl md:text-5xl font-serif font-bold text-[var(--ink)] tracking-tight">
             Ada Multi-Agent Architecture
           </h1>
-          <p className="text-zinc-400 text-xs sm:text-sm leading-relaxed">
+          <p className="text-[var(--ink-2)] text-xs sm:text-sm leading-relaxed">
             A distributed, dual-corpus deep research engine designed for empirical citation grounding, adversarial gap arbitration, and resilient failover.
           </p>
         </div>
 
         {/* Live System Diagnostics Ribbon */}
-        <div className="bg-[#121316] border border-white/[0.08] rounded-xl p-4 sm:p-5 shadow-lg">
+        <div className="bg-[var(--surface)] border border-[var(--line)] rounded-[12px] p-4 sm:p-5 shadow-xs">
           <div className="flex flex-wrap items-center justify-between gap-4">
             <div className="flex items-center gap-3">
-              <div className={`w-2.5 h-2.5 rounded-full ${backendStatus?.status === "ok" ? "bg-white" : "bg-zinc-600"}`} />
+              <div className={`w-2.5 h-2.5 rounded-full ${backendStatus?.status === "ok" ? "bg-[var(--ok)]" : "bg-[var(--warn)]"}`} />
               <div>
-                <span className="text-xs font-mono font-bold text-zinc-100 block">
+                <span className="text-xs font-mono font-bold text-[var(--ink)] block">
                   Backend Engine: {backendStatus?.service || "Ada Core"}
                 </span>
-                <span className="text-[11px] text-zinc-400 font-mono">
-                  Mode: {backendStatus?.engine || "multi-agent-sync-executor"}
+                <span className="text-[11px] text-[var(--ink-3)] font-mono">
+                  Mode: {backendStatus?.engine || "multi-agent-langgraph-executor"}
                 </span>
               </div>
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-zinc-400">
-              <div className="flex items-center gap-1.5 bg-[#17181d] px-3 py-1.5 rounded-lg border border-white/[0.06]">
-                <Database className="w-3.5 h-3.5 text-zinc-300" />
-                <span>Qdrant ONNX (384d)</span>
+            <div className="flex flex-wrap items-center gap-3 text-xs font-mono text-[var(--ink-2)]">
+              <div className="flex items-center gap-1.5 bg-[var(--surface-2)] px-3 py-1.5 rounded-[6px] border border-[var(--line)]">
+                <Database className="w-3.5 h-3.5 text-[var(--accent)]" />
+                <span>Qdrant (384d BGE)</span>
               </div>
-              <div className="flex items-center gap-1.5 bg-[#17181d] px-3 py-1.5 rounded-lg border border-white/[0.06]">
-                <Globe className="w-3.5 h-3.5 text-zinc-300" />
-                <span>Jina 3-Tier Headless</span>
+              <div className="flex items-center gap-1.5 bg-[var(--surface-2)] px-3 py-1.5 rounded-[6px] border border-[var(--line)]">
+                <Globe className="w-3.5 h-3.5 text-[var(--accent)]" />
+                <span>Trafilatura + Jina Fallback</span>
               </div>
-              <div className="flex items-center gap-1.5 bg-[#17181d] px-3 py-1.5 rounded-lg border border-white/[0.06]">
-                <Zap className="w-3.5 h-3.5 text-zinc-300" />
-                <span>Gemini 1M + Groq Failover</span>
+              <div className="flex items-center gap-1.5 bg-[var(--surface-2)] px-3 py-1.5 rounded-[6px] border border-[var(--line)]">
+                <Zap className="w-3.5 h-3.5 text-[var(--accent)]" />
+                <span>Groq 429 Failover to Gemini</span>
               </div>
             </div>
           </div>
@@ -181,10 +189,10 @@ export default function ArchitecturePage() {
           {/* Left Column: Visual Pipeline Flow (5 cols) */}
           <div className="lg:col-span-5 space-y-3">
             <div className="flex items-center justify-between pb-1">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-semibold">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold">
                 Execution Pipeline Stages
               </span>
-              <span className="text-[10px] text-zinc-500 font-mono">Select to inspect</span>
+              <span className="text-[10px] text-[var(--ink-4)] font-mono">Select to inspect · use ↑ ↓ to navigate</span>
             </div>
 
             {PIPELINE_NODES.map((node, idx) => {
@@ -192,37 +200,59 @@ export default function ArchitecturePage() {
               return (
                 <div key={node.id} className="space-y-2">
                   <button
+                    ref={(element) => { stageButtons.current[idx] = element; }}
                     onClick={() => setSelectedNode(node)}
+                    onKeyDown={(event) => {
+                      let nextIndex: number | null = null;
+                      if (event.key === "ArrowDown" || event.key === "ArrowRight") {
+                        nextIndex = (idx + 1) % PIPELINE_NODES.length;
+                      } else if (event.key === "ArrowUp" || event.key === "ArrowLeft") {
+                        nextIndex = (idx - 1 + PIPELINE_NODES.length) % PIPELINE_NODES.length;
+                      } else if (event.key === "Home") {
+                        nextIndex = 0;
+                      } else if (event.key === "End") {
+                        nextIndex = PIPELINE_NODES.length - 1;
+                      }
+
+                      if (nextIndex !== null) {
+                        event.preventDefault();
+                        setSelectedNode(PIPELINE_NODES[nextIndex]);
+                        stageButtons.current[nextIndex]?.focus();
+                      }
+                    }}
+                    aria-label={`Inspect stage ${idx + 1}: ${node.name.replace(/^\d+\.\s*/, "")}`}
+                    aria-pressed={isSelected}
+                    tabIndex={idx === selectedIndex ? 0 : -1}
                     className={`w-full text-left p-4 rounded-xl border transition-all cursor-pointer flex items-center justify-between group ${
                       isSelected
-                        ? "bg-[#17181d] border-white/20 text-zinc-100 shadow-sm"
-                        : "bg-[#121316] border-white/[0.07] text-zinc-300 hover:border-white/[0.14] hover:bg-[#15171d]"
+                        ? "bg-[var(--surface-2)] border-[var(--ink-3)] text-[var(--ink)] shadow-xs"
+                        : "bg-[var(--surface)] border-[var(--line)] text-[var(--ink-2)] hover:border-[var(--line-strong)] hover:bg-[var(--surface-2)]"
                     }`}
                   >
                     <div className="space-y-1">
                       <div className="flex items-center gap-2">
                         <span className={`text-[10px] font-mono px-2 py-0.5 rounded font-semibold uppercase ${
-                          isSelected ? "bg-white text-zinc-950" : "bg-white/[0.06] text-zinc-400"
+                          isSelected ? "bg-[var(--ink)] text-[var(--paper)]" : "bg-[var(--surface-3)] text-[var(--ink-3)]"
                         }`}>
                           Step 0{idx + 1}
                         </span>
-                        <h4 className="text-xs font-semibold text-zinc-100 group-hover:text-white transition-colors">
+                        <h4 className="text-xs font-semibold text-[var(--ink)] group-hover:text-[var(--accent)] transition-colors">
                           {node.name.replace(/^\d+\.\s*/, '')}
                         </h4>
                       </div>
-                      <p className="text-[11px] text-zinc-400 line-clamp-1 font-mono">
+                      <p className="text-[11px] text-[var(--ink-3)] line-clamp-1 font-mono">
                         {node.modelOrTech}
                       </p>
                     </div>
 
                     <ArrowRight className={`w-4 h-4 transition-transform ${
-                      isSelected ? "text-zinc-100 translate-x-1" : "text-zinc-600 group-hover:text-zinc-400"
+                      isSelected ? "text-[var(--accent)] translate-x-1" : "text-[var(--ink-4)] group-hover:text-[var(--ink-2)]"
                     }`} />
                   </button>
 
                   {idx < PIPELINE_NODES.length - 1 && (
                     <div className="flex justify-center py-0.5">
-                      <ArrowDown className="w-3.5 h-3.5 text-zinc-700" />
+                      <ArrowDown className="w-3.5 h-3.5 text-[var(--line-strong)]" />
                     </div>
                   )}
                 </div>
@@ -231,45 +261,45 @@ export default function ArchitecturePage() {
           </div>
 
           {/* Right Column: Node Deep-Dive Inspector (7 cols) */}
-          <div className="lg:col-span-7 bg-[#121316] border border-white/[0.08] rounded-xl p-6 sm:p-7 space-y-6 shadow-xl sticky top-20">
+          <div className="lg:col-span-7 bg-[var(--surface)] border border-[var(--line)] rounded-xl p-6 sm:p-7 space-y-6 shadow-xl sticky top-20">
             {/* Selected Node Header */}
-            <div className="space-y-2 border-b border-white/[0.06] pb-5">
+            <div className="space-y-2 border-b border-[var(--line)] pb-5">
               <div className="flex items-center gap-2">
-                <span className="text-[11px] font-mono px-2.5 py-0.5 rounded bg-white/[0.06] text-zinc-200 border border-white/[0.1] font-semibold uppercase">
+                <span className="text-[11px] font-mono px-2.5 py-0.5 rounded bg-[var(--surface-2)] text-[var(--ink-2)] border border-[var(--line)] font-semibold uppercase">
                   {selectedNode.name}
                 </span>
-                <span className="text-[11px] font-mono text-zinc-400">
+                <span className="text-[11px] font-mono text-[var(--ink-3)]">
                   {selectedNode.role}
                 </span>
               </div>
-              <h3 className="text-xl font-serif font-bold text-zinc-100">
+              <h3 className="text-xl font-serif font-bold text-[var(--ink)]">
                 {selectedNode.modelOrTech}
               </h3>
-              <p className="text-xs sm:text-sm text-zinc-300 leading-relaxed font-sans pt-1">
+              <p className="text-xs sm:text-sm text-[var(--ink-2)] leading-relaxed font-sans pt-1">
                 {selectedNode.description}
               </p>
             </div>
 
             {/* Inputs & Outputs Grid */}
             <div className="grid grid-cols-1 sm:grid-cols-2 gap-4">
-              <div className="bg-[#17181d] border border-white/[0.06] p-4 rounded-lg space-y-2">
-                <span className="text-[10px] font-mono uppercase text-zinc-400 font-semibold flex items-center gap-1.5">
-                  <Terminal className="w-3.5 h-3.5 text-zinc-300" />
+              <div className="bg-[var(--surface-2)] border border-[var(--line)] p-4 rounded-lg space-y-2">
+                <span className="text-[10px] font-mono uppercase text-[var(--ink-3)] font-semibold flex items-center gap-1.5">
+                  <Terminal className="w-3.5 h-3.5 text-[var(--ink-2)]" />
                   Contract Inputs
                 </span>
-                <ul className="text-xs text-zinc-400 space-y-1 list-disc pl-4 font-mono">
+                <ul className="text-xs text-[var(--ink-3)] space-y-1 list-disc pl-4 font-mono">
                   {selectedNode.inputs.map((inp, i) => (
                     <li key={i}>{inp}</li>
                   ))}
                 </ul>
               </div>
 
-              <div className="bg-[#17181d] border border-white/[0.06] p-4 rounded-lg space-y-2">
-                <span className="text-[10px] font-mono uppercase text-zinc-400 font-semibold flex items-center gap-1.5">
-                  <CheckCircle2 className="w-3.5 h-3.5 text-zinc-300" />
+              <div className="bg-[var(--surface-2)] border border-[var(--line)] p-4 rounded-lg space-y-2">
+                <span className="text-[10px] font-mono uppercase text-[var(--ink-3)] font-semibold flex items-center gap-1.5">
+                  <CheckCircle2 className="w-3.5 h-3.5 text-[var(--ok)]" />
                   Contract Outputs
                 </span>
-                <ul className="text-xs text-zinc-400 space-y-1 list-disc pl-4 font-mono">
+                <ul className="text-xs text-[var(--ink-3)] space-y-1 list-disc pl-4 font-mono">
                   {selectedNode.outputs.map((out, i) => (
                     <li key={i}>{out}</li>
                   ))}
@@ -278,27 +308,27 @@ export default function ArchitecturePage() {
             </div>
 
             {/* Resiliency & Fault Tolerance */}
-            <div className="bg-white/[0.03] border border-white/[0.08] p-4 rounded-lg space-y-1.5">
-              <span className="text-[10px] font-mono uppercase text-zinc-300 font-semibold flex items-center gap-1.5">
-                <ShieldCheck className="w-3.5 h-3.5 text-zinc-200" />
+            <div className="bg-[var(--surface-2)] border border-[var(--line)] p-4 rounded-lg space-y-1.5">
+              <span className="text-[10px] font-mono uppercase text-[var(--ink-2)] font-semibold flex items-center gap-1.5">
+                <ShieldCheck className="w-3.5 h-3.5 text-[var(--accent)]" />
                 Resiliency & Fault Tolerance Guarantee
               </span>
-              <p className="text-xs text-zinc-400 leading-relaxed">
+              <p className="text-xs text-[var(--ink-3)] leading-relaxed">
                 {selectedNode.resiliency}
               </p>
             </div>
 
             {/* Code Snippet Preview */}
             <div className="space-y-2">
-              <div className="flex items-center justify-between text-[11px] font-mono text-zinc-400">
+              <div className="flex items-center justify-between text-[11px] font-mono text-[var(--ink-3)]">
                 <span className="flex items-center gap-1.5">
-                  <Code className="w-3.5 h-3.5 text-zinc-300" />
+                  <Code className="w-3.5 h-3.5 text-[var(--ink-2)]" />
                   Implementation Reference
                 </span>
-                <span className="text-zinc-500">engine/</span>
+                <span className="text-[var(--ink-4)]">engine/</span>
               </div>
-              <div className="bg-[#17181d] p-4 rounded-lg border border-white/[0.06] overflow-x-auto">
-                <pre className="text-xs font-mono text-zinc-300 leading-relaxed">
+              <div className="bg-[var(--surface-2)] p-4 rounded-lg border border-[var(--line)] overflow-x-auto">
+                <pre className="text-xs font-mono text-[var(--ink-2)] leading-relaxed">
                   <code>{selectedNode.codeSnippet}</code>
                 </pre>
               </div>

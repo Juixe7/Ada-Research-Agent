@@ -15,6 +15,7 @@ RUN pip install --no-cache-dir -r requirements.txt
 
 # Copy engine application code (Secrets are injected at runtime via environment variables, never baked into image)
 COPY engine ./engine
+COPY packages ./packages
 
 # Create persistent storage directories
 RUN mkdir -p /app/uploads /app/dossiers /app/qdrant_data /app/data

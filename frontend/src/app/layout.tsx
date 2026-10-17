@@ -1,32 +1,33 @@
 import type { Metadata } from "next";
-import { Inter, Newsreader, JetBrains_Mono } from "next/font/google";
+import { Instrument_Sans, Source_Serif_4, JetBrains_Mono } from "next/font/google";
 import "./globals.css";
 
-const inter = Inter({
+const instrumentSans = Instrument_Sans({
   subsets: ["latin"],
-  variable: "--font-sans",
+  variable: "--font-instrument-sans",
   display: "swap",
 });
 
-const newsreader = Newsreader({
+const sourceSerif = Source_Serif_4({
   subsets: ["latin"],
-  style: ["normal", "italic"],
-  variable: "--font-serif",
+  variable: "--font-source-serif",
   display: "swap",
 });
 
 const jetbrainsMono = JetBrains_Mono({
   subsets: ["latin"],
-  variable: "--font-mono",
+  variable: "--font-jetbrains-mono",
   display: "swap",
 });
 
 export const metadata: Metadata = {
-  title: "Ada — Autonomous Deep Research Agent",
-  description: "Distributed multi-agent deep research engine with dual web and private document ingestion.",
+  title: "Ada — Research workspace",
+  description: "A personal workspace for planning research, reviewing evidence, and writing grounded reports.",
 };
 
 import { AuthProvider } from "@/context/AuthContext";
+import CommandPalette from "@/components/CommandPalette";
+import AuthBoundary from "@/components/AuthBoundary";
 
 export default function RootLayout({
   children,
@@ -34,10 +35,15 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en" className="dark">
-      <body className={`${inter.variable} ${newsreader.variable} ${jetbrainsMono.variable} font-sans min-h-screen bg-[#0c0d12] text-[#f4f4f5] antialiased selection:bg-white/20 selection:text-white`}>
+    <html lang="en">
+      <body
+        className={`${instrumentSans.variable} ${sourceSerif.variable} ${jetbrainsMono.variable} font-sans min-h-screen bg-[var(--paper)] text-[var(--ink)] antialiased selection:bg-[var(--accent-soft)] selection:text-[var(--ink)]`}
+      >
         <AuthProvider>
-          {children}
+          <AuthBoundary>
+            {children}
+            <CommandPalette />
+          </AuthBoundary>
         </AuthProvider>
       </body>
     </html>

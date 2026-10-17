@@ -42,8 +42,11 @@ class AdaVectorStore:
             try:
                 self.client = QdrantClient(path=QDRANT_STORAGE_PATH)
             except Exception as e:
-                print(f"[vector_store] Local path locked ({e}); falling back to in-memory client...")
-                self.client = QdrantClient(location=":memory:")
+                raise RuntimeError(
+                    f"Persistent Qdrant storage at '{QDRANT_STORAGE_PATH}' is unavailable or locked. "
+                    "Start the configured Qdrant service or stop the other local instance; "
+                    "Ada will not silently use an empty in-memory index."
+                ) from e
 
         self._ensure_collection()
 
@@ -61,7 +64,7 @@ class AdaVectorStore:
                 )
                 print(f"[vector_store] Created collection: {self.collection_name}")
         except Exception as e:
-            print(f"[vector_store] Collection check error: {e}")
+            raise RuntimeError(f"Could not initialize Qdrant collection '{self.collection_name}'.") from e
 
     def embed_texts(self, texts: List[str]) -> List[List[float]]:
         """Generates 384-dimensional dense vectors."""
@@ -74,6 +77,8 @@ class AdaVectorStore:
         """
         if not chunks:
             return 0
+        if any(not chunk.get("user_id") for chunk in chunks):
+            raise ValueError("Every private vault chunk must include its owner user_id.")
 
         texts = [c["text"] for c in chunks]
         embeddings = self.embed_texts(texts)
@@ -90,6 +95,10 @@ class AdaVectorStore:
                 "char_count": chunk.get("char_count", len(chunk.get("text", ""))),
                 "user_id": chunk.get("user_id")
             }
+            if chunk.get("section_path"):
+                payload["section_path"] = chunk["section_path"]
+            if chunk.get("chunk_index") is not None:
+                payload["chunk_index"] = chunk["chunk_index"]
             points.append(
                 models.PointStruct(
                     id=point_id,
@@ -115,8 +124,10 @@ class AdaVectorStore:
     ) -> List[Dict[str, Any]]:
         """
         Retrieves most relevant chunks from private user documents.
-        If selected_docs or user_id is provided, filters accordingly.
+        Private document retrieval always requires an explicit tenant identity.
         """
+        if not user_id:
+            return []
         query_vector = self.embed_texts([query])[0]
         
         must_conditions = [
@@ -156,12 +167,52 @@ class AdaVectorStore:
         for hit in response.points:
             matches.append({
                 "score": round(hit.score, 4),
+                "chunk_id": hit.payload.get("chunk_id"),
+                "chunk_index": hit.payload.get("chunk_index"),
+                "section_path": hit.payload.get("section_path"),
                 "doc_name": hit.payload.get("doc_name"),
                 "page_number": hit.payload.get("page_number"),
+                "section_path": hit.payload.get("section_path"),
+                "chunk_index": hit.payload.get("chunk_index"),
                 "text": hit.payload.get("text"),
                 "source_type": "user_doc"
             })
         return matches
+
+    def replace_document_chunks(self, chunks: List[Dict[str, Any]], doc_name: str, user_id: str) -> int:
+        """Index a new document version first, then remove only this owner's old points."""
+        if not user_id or any(chunk.get("user_id") != user_id for chunk in chunks):
+            raise ValueError("Replacement chunks must include the document owner's user_id.")
+
+        doc_filter = models.Filter(must=[
+            models.FieldCondition(key="doc_name", match=models.MatchValue(value=doc_name)),
+            models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id)),
+            models.FieldCondition(key="source_type", match=models.MatchValue(value="user_doc")),
+        ])
+        old_point_ids = []
+        offset = None
+        while True:
+            page, offset = self.client.scroll(
+                collection_name=self.collection_name,
+                scroll_filter=doc_filter,
+                limit=256,
+                offset=offset,
+                with_payload=False,
+                with_vectors=False,
+            )
+            old_point_ids.extend(point.id for point in page)
+            if offset is None:
+                break
+
+        indexed_count = self.index_document_chunks(chunks)
+        if indexed_count != len(chunks):
+            raise RuntimeError("The replacement document was not fully indexed.")
+        if old_point_ids:
+            self.client.delete(
+                collection_name=self.collection_name,
+                points_selector=models.PointIdsList(points=old_point_ids),
+            )
+        return indexed_count
 
     def get_document_chunks(
         self,
@@ -170,6 +221,8 @@ class AdaVectorStore:
         user_id: Optional[str] = None
     ) -> List[Dict[str, Any]]:
         """Retrieves stored text chunks for a given document."""
+        if not user_id:
+            return []
         try:
             must_conds = [
                 models.FieldCondition(
@@ -189,35 +242,25 @@ class AdaVectorStore:
                 scroll_filter=models.Filter(must=must_conds),
                 limit=limit
             )
-            # Fallback if legacy chunks were indexed without user_id
-            if not scroll_res[0] and user_id:
-                scroll_res = self.client.scroll(
-                    collection_name=self.collection_name,
-                    scroll_filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="doc_name",
-                                match=models.MatchValue(value=doc_name)
-                            )
-                        ]
-                    ),
-                    limit=limit
-                )
             chunks = []
             for pt in scroll_res[0]:
                 chunks.append({
                     "chunk_id": pt.payload.get("chunk_id"),
                     "page_number": pt.payload.get("page_number", 1),
+                    "section_path": pt.payload.get("section_path"),
+                    "chunk_index": pt.payload.get("chunk_index"),
                     "text": pt.payload.get("text", ""),
                     "char_count": pt.payload.get("char_count", len(pt.payload.get("text", "")))
                 })
-            return sorted(chunks, key=lambda x: x.get("page_number", 1))
+            return sorted(chunks, key=lambda x: (x.get("page_number", 1), x.get("chunk_index") or 0))
         except Exception as e:
             print(f"[vector_store] Error fetching chunks for '{doc_name}': {e}")
             return []
 
     def get_document_chunks_count(self, doc_name: str, user_id: Optional[str] = None) -> int:
         """Counts how many chunks are indexed in Qdrant for this document."""
+        if not user_id:
+            return 0
         try:
             must_conds = [
                 models.FieldCondition(
@@ -236,24 +279,14 @@ class AdaVectorStore:
                 collection_name=self.collection_name,
                 count_filter=models.Filter(must=must_conds)
             )
-            if count_res.count == 0 and user_id:
-                count_res = self.client.count(
-                    collection_name=self.collection_name,
-                    count_filter=models.Filter(
-                        must=[
-                            models.FieldCondition(
-                                key="doc_name",
-                                match=models.MatchValue(value=doc_name)
-                            )
-                        ]
-                    )
-                )
             return count_res.count
         except Exception:
             return 0
 
     def delete_document(self, doc_name: str, user_id: Optional[str] = None) -> bool:
         """Deletes all indexed chunks for a given document name from Qdrant."""
+        if not user_id:
+            return False
         try:
             must_conds = [
                 models.FieldCondition(

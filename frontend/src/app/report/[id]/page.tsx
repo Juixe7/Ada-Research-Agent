@@ -1,204 +1,167 @@
 "use client";
 
-import { useEffect, useState, use, useMemo, useRef } from "react";
+import React, { useState, useEffect, useRef, use, useMemo } from "react";
+import Link from "next/link";
+import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
-import { 
-  ArrowLeft, CheckCircle2, Clock, FileText, AlertTriangle,
-  Copy, Check, X, ArrowUpRight, BookOpen, Hash, Printer,
-  Download, MessageSquare, Send, Loader2, ChevronLeft, ChevronRight,
-  Database, RefreshCw, Plus, Share2, Globe, Lock, Edit3, Activity,
-  PanelLeftClose, PanelLeftOpen, Search, Sparkles
+import {
+  ArrowLeft, Check, Copy, ExternalLink, Printer,
+  ShieldCheck, AlertTriangle, X, ChevronRight, Share2,
+  Database, Activity, FileText, CornerDownRight, MessageSquare,
+  CheckCircle2, ChevronDown, Plus, Download, Sliders
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
-import { API_URL } from "@/lib/config";
+import RunInspectorDrawer from "@/components/RunInspectorDrawer";
+import { API_URL, formatDossierDate } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
 
-export default function DossierPage({ params }: { params: Promise<{ id: string }> }) {
+function headingText(node: any): string {
+  if (node == null || typeof node === "boolean") return "";
+  if (typeof node === "string" || typeof node === "number") return String(node);
+  if (Array.isArray(node)) return node.map(headingText).join("");
+  if (React.isValidElement(node)) return headingText((node.props as any).children);
+  return "";
+}
+
+function headingSlug(value: string): string {
+  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "section";
+}
+
+function sourceDomain(url?: string | null): string {
+  if (!url) return "vault";
+  try {
+    return new URL(url).hostname;
+  } catch {
+    return "external source";
+  }
+}
+
+export default function ReportReaderPage({
+  params,
+}: {
+  params: Promise<{ id: string }>;
+}) {
   const resolvedParams = use(params);
   const reportId = resolvedParams.id;
-  const { token } = useAuth();
+  const router = useRouter();
+  const { token, loading: authLoading } = useAuth();
 
-  // Report & Pipeline State
+  // Core Data
   const [report, setReport] = useState<any>(null);
-  const [status, setStatus] = useState<string>("planning");
-  const [initialLoading, setInitialLoading] = useState(true);
-  const [stage, setStage] = useState<string>("Initializing investigation...");
-  const [progress, setProgress] = useState(10);
-  const [elapsedSec, setElapsedSec] = useState(0);
-  const [cancelling, setCancelling] = useState(false);
+  const [loading, setLoading] = useState(true);
+  const [status, setStatus] = useState<string>("loading");
   const [copied, setCopied] = useState(false);
-  const [isPublic, setIsPublic] = useState(false);
+  const [sharing, setSharing] = useState(false);
+  const [toastMsg, setToastMsg] = useState<string | null>(null);
 
-  // Multi-Turn Session State
-  const [sessionData, setSessionData] = useState<any>(null);
-
-  // Layout & Navigation State
-  const [viewMode, setViewMode] = useState<"continuous" | "pager">("continuous");
-  const [activeChapterIdx, setActiveChapterIdx] = useState(0);
+  // Screen 7.4 Toolbar Controls
+  const [showVerification, setShowVerification] = useState(false);
+  const [textSize, setTextSize] = useState<"S" | "M" | "L">("M");
   const [scrollProgress, setScrollProgress] = useState(0);
-  const [tocCollapsed, setTocCollapsed] = useState(false);
+  const [activeSectionId, setActiveSectionId] = useState<string>("");
 
-  // Side Evidence Inspector State
+  // Screen 7.8 Evidence Inspector & Claim Overlay
   const [selectedCitation, setSelectedCitation] = useState<any>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
+  const [runInspectorOpen, setRunInspectorOpen] = useState(false);
 
-  // Highlight Q&A (Reading Assistant) State
-  const floatingMenuRef = useRef<HTMLDivElement>(null);
-  const selectedTextRef = useRef<string>("");
-  const [floatingMenu, setFloatingMenu] = useState<{ text: string; x: number; y: number } | null>(null);
-  const [highlightQuestion, setHighlightQuestion] = useState("");
-  const [highlightAnswer, setHighlightAnswer] = useState<string | null>(null);
-  const [highlightLoading, setHighlightLoading] = useState(false);
-  const [readingAssistantOpen, setReadingAssistantOpen] = useState(false);
-  const [assistantSelectedText, setAssistantSelectedText] = useState("");
+  // Screen 7.5 Follow-up Panel
+  const [followupQuery, setFollowupQuery] = useState("");
+  const [followupLoading, setFollowupLoading] = useState(false);
+  const [followupThreads, setFollowupThreads] = useState<any[]>([]);
+  const [selectedFollowupText, setSelectedFollowupText] = useState("");
+  const followupInputRef = useRef<HTMLInputElement>(null);
 
-  // Standalone Addendum Composer State
-  const [addendumInquiry, setAddendumInquiry] = useState("");
-  const [addendumLoading, setAddendumLoading] = useState(false);
-
-  // Source Q&A State
-  const [sourceQuestion, setSourceQuestion] = useState("");
-  const [sourceAnswer, setSourceAnswer] = useState<string | null>(null);
-  const [sourceLoading, setSourceLoading] = useState(false);
-
-  const [toastMessage, setToastMessage] = useState<string | null>(null);
+  // Selection Floating Menu
+  const [floatingSelection, setFloatingSelection] = useState<{ text: string; x: number; y: number } | null>(null);
 
   const showToast = (msg: string) => {
-    setToastMessage(msg);
-    setTimeout(() => setToastMessage(null), 3000);
+    setToastMsg(msg);
+    setTimeout(() => setToastMsg(null), 3000);
   };
 
-  // Timer during active execution
-  useEffect(() => {
-    if (initialLoading || status === "completed" || status === "failed" || status === "cancelled" || status === "not_found") return;
-    const interval = setInterval(() => setElapsedSec(s => s + 1), 1000);
-    return () => clearInterval(interval);
-  }, [status, initialLoading]);
-
-  // Status Polling Loop
-  useEffect(() => {
-    let isMounted = true;
-    let pollInterval: any = null;
-
-    const fetchStatus = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/report/status/${reportId}`);
-        if (!res.ok) {
-          if (res.status === 404 && isMounted) {
-            setStatus("not_found");
-            if (pollInterval) clearInterval(pollInterval);
-          }
-          return;
-        }
-        const data = await res.json();
-        if (!isMounted) return;
-
-        setStatus(data.status);
-        if (data.stage) setStage(data.stage);
-        if (data.progress) setProgress(data.progress);
-        if (data.query) {
-          setReport((prev: any) => ({ ...(prev || {}), query: data.query }));
-        }
-
-        if (data.status === "completed" && data.result) {
-          setReport(data.result);
-          if (data.result.session_id) {
-            fetchSession(data.result.session_id);
-          }
-          clearInterval(pollInterval);
-        } else if (data.status === "cancelled" || data.status === "failed") {
-          clearInterval(pollInterval);
-        }
-      } catch (err) {
-        console.warn("Status poll warning:", err);
-      } finally {
-        if (isMounted) {
-          setInitialLoading(false);
-        }
-      }
-    };
-
-    fetchStatus();
-    pollInterval = setInterval(fetchStatus, 2000);
-
-    return () => {
-      isMounted = false;
-      clearInterval(pollInterval);
-    };
-  }, [reportId]);
-
-  // Fetch session details if part of a multi-turn session
-  const fetchSession = async (sessionId: string) => {
-    try {
-      const headers: Record<string, string> = {};
-      if (token) headers["Authorization"] = `Bearer ${token}`;
-      const res = await fetch(`${API_URL}/api/sessions/${sessionId}`, { headers });
-      if (res.ok) {
-        const sData = await res.json();
-        setSessionData(sData);
-      }
-    } catch (err) {
-      console.warn("Session fetch warning:", err);
-    }
-  };
-
-  // Scroll Progress Listener
+  // Reading progress tracking & Scroll-spy
   useEffect(() => {
     const handleScroll = () => {
-      const total = document.documentElement.scrollHeight - window.innerHeight;
+      const el = document.documentElement;
+      const total = el.scrollHeight - el.clientHeight;
       if (total > 0) {
-        setScrollProgress(Math.min(100, Math.max(0, Math.round((window.scrollY / total) * 100))));
+        setScrollProgress((el.scrollTop / total) * 100);
       }
+
+      // Scroll spy for sections
+      const headings = document.querySelectorAll("h2[id]");
+      let currentId = "";
+      headings.forEach((h) => {
+        const top = h.getBoundingClientRect().top;
+        if (top < 150) {
+          currentId = h.id;
+        }
+      });
+      if (currentId) setActiveSectionId(currentId);
     };
+
     window.addEventListener("scroll", handleScroll, { passive: true });
     return () => window.removeEventListener("scroll", handleScroll);
   }, []);
 
-  // Cancel Investigation
-  const handleCancelResearch = async () => {
-    setCancelling(true);
-    try {
-      const res = await fetch(`${API_URL}/api/research/${reportId}/cancel`, {
-        method: "POST"
-      });
-      if (res.ok) {
-        setStatus("cancelled");
-        setStage("Investigation cancelled by user.");
-        showToast("Investigation cancelled.");
-      }
-    } catch (err) {
-      console.error("Cancel failed:", err);
-    } finally {
-      setCancelling(false);
-    }
-  };
-
-  // Text selection handler for reading assistant
+  // Fetch report data
   useEffect(() => {
-    const handleMouseUp = (e: MouseEvent) => {
-      // If clicking inside the floating toolbar, do not close or clear
-      if (floatingMenuRef.current && floatingMenuRef.current.contains(e.target as Node)) {
-        return;
-      }
+    if (authLoading) return;
+    const headers: Record<string, string> = {};
+    if (token) headers["Authorization"] = `Bearer ${token}`;
 
-      const selection = window.getSelection();
-      if (!selection || selection.isCollapsed) {
-        setFloatingMenu(null);
+    fetch(`${API_URL}/api/v1/runs/${reportId}/report`, { headers })
+      .then(async (res) => {
+        if (res.ok) return res.json();
+        const fallback = await fetch(`${API_URL}/api/report/status/${reportId}`, { headers });
+        if (!fallback.ok) throw new Error("Research dossier not found or access denied.");
+        const data = await fallback.json();
+        if (data.status !== "completed") {
+          router.replace(`/run/${reportId}`);
+          return null;
+        }
+        return data.result || data;
+      })
+      .then((data) => {
+        if (!data) return;
+        if (data.status && data.status !== "completed") {
+          // Still running: redirect to Screen 7.3 Live Hero View
+          router.replace(`/run/${reportId}`);
+          return;
+        }
+        if (!data.report_markdown && !data.monograph) {
+          setStatus("not_found");
+          return;
+        }
+        setReport(data);
+        setStatus("completed");
+      })
+      .catch((err) => {
+        console.warn("Report fetch warning:", err);
+        setStatus("not_found");
+      })
+      .finally(() => setLoading(false));
+  }, [authLoading, reportId, token, router]);
+
+  // Handle text selection for "Ask about this" floating action
+  useEffect(() => {
+    const handleMouseUp = () => {
+      const sel = window.getSelection();
+      if (!sel || sel.isCollapsed || !sel.toString().trim()) {
+        setFloatingSelection(null);
         return;
       }
-      const text = selection.toString().trim();
-      if (text.length > 8) {
-        selectedTextRef.current = text;
-        const range = selection.getRangeAt(0);
+      const text = sel.toString().trim();
+      if (text.length > 5 && text.length < 500) {
+        const range = sel.getRangeAt(0);
         const rect = range.getBoundingClientRect();
-        setFloatingMenu({
+        setFloatingSelection({
           text,
           x: rect.left + rect.width / 2,
-          y: Math.max(10, rect.top - 44)
+          y: rect.top - 36,
         });
-      } else {
-        setFloatingMenu(null);
       }
     };
 
@@ -206,1171 +169,776 @@ export default function DossierPage({ params }: { params: Promise<{ id: string }
     return () => document.removeEventListener("mouseup", handleMouseUp);
   }, []);
 
-  const executeQuerySelection = async (text: string, question: string) => {
-    setHighlightLoading(true);
-    setHighlightAnswer(null);
-
-    try {
-      const res = await fetch(`${API_URL}/api/report/${reportId}/query-selection`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          selected_text: text,
-          question: question
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.answer) {
-        setHighlightAnswer(data.answer);
-      } else {
-        const errorMsg = data?.detail || data?.message || (res.status === 429 ? "AI rate limit reached. Please wait 30 seconds." : "Unable to extract an answer for this passage.");
-        setHighlightAnswer(errorMsg);
-      }
-    } catch (err: any) {
-      setHighlightAnswer("Error contacting inline assistant.");
-    } finally {
-      setHighlightLoading(false);
-    }
-  };
-
-  const handleOpenReadingAssistant = (presetPrompt?: string) => {
-    const textToQuery = selectedTextRef.current || floatingMenu?.text || "";
-    if (!textToQuery) return;
-    setAssistantSelectedText(textToQuery);
-    setHighlightQuestion(presetPrompt || "");
-    setHighlightAnswer(null);
-    setInspectorOpen(false);
-    setReadingAssistantOpen(true);
-    setFloatingMenu(null);
-    if (presetPrompt) {
-      executeQuerySelection(textToQuery, presetPrompt);
-    }
-  };
-
-  // Ask Reading Assistant a question on highlighted passage
-  const handleAskReadingAssistant = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!highlightQuestion.trim() || highlightLoading) return;
-    await executeQuerySelection(assistantSelectedText, highlightQuestion.trim());
-  };
-
-  // Ask question on specific source citation
-  const handleQuerySource = async (e?: React.FormEvent) => {
-    if (e) e.preventDefault();
-    if (!selectedCitation || !sourceQuestion.trim() || sourceLoading) return;
-
-    setSourceLoading(true);
-    setSourceAnswer(null);
-
-    try {
-      const res = await fetch(`${API_URL}/api/report/${reportId}/query-source`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          source_id: selectedCitation.id,
-          question: sourceQuestion.trim()
-        })
-      });
-      const data = await res.json();
-      if (res.ok && data.answer) {
-        setSourceAnswer(data.answer);
-      } else {
-        setSourceAnswer("This source does not mention that specific information.");
-      }
-    } catch (err) {
-      setSourceAnswer("Failed to interrogate source citation.");
-    } finally {
-      setSourceLoading(false);
-    }
-  };
-
-  // Author & Append an Addendum
-  const handleCreateAddendum = async (inquiryText: string) => {
-    if (!inquiryText.trim() || addendumLoading) return;
-
-    setAddendumLoading(true);
-    try {
-      const res = await fetch(`${API_URL}/api/report/${reportId}/addendum`, {
-        method: "POST",
-        headers: { "Content-Type": "application/json" },
-        body: JSON.stringify({
-          inquiry: inquiryText.trim(),
-          context: report?.monograph?.slice(0, 800) || ""
-        })
-      });
-      const data = await res.json().catch(() => ({}));
-      if (res.ok && data.addendum_markdown) {
-        setReport((prev: any) => ({
-          ...prev,
-          monograph: data.monograph || ((prev?.monograph || prev?.report_markdown || "") + "\n\n" + data.addendum_markdown),
-          report_markdown: data.updated_report_markdown || ((prev?.report_markdown || prev?.monograph || "") + "\n\n" + data.addendum_markdown)
-        }));
-        setAddendumInquiry("");
-        showToast("Authoritative Addendum appended to monograph.");
-      } else {
-        const errorMsg = data?.detail || data?.message || (res.status === 429 ? "AI rate limit reached. Please wait 30 seconds." : "Failed to generate Addendum.");
-        showToast(errorMsg);
-      }
-    } catch (err: any) {
-      showToast(err?.message || "Error generating Addendum.");
-    } finally {
-      setAddendumLoading(false);
-    }
-  };
-
-  // Toggle Public Sharing Link
-  const handleTogglePublic = async () => {
-    if (!token) {
-      showToast("Sign in to toggle public sharing.");
-      return;
-    }
-    try {
-      const res = await fetch(`${API_URL}/api/report/${reportId}/toggle-public`, {
-        method: "POST",
-        headers: { Authorization: `Bearer ${token}` }
-      });
-      if (res.ok) {
-        const data = await res.json();
-        setIsPublic(data.is_public);
-        showToast(data.is_public ? "Public share link enabled." : "Dossier set to private.");
-      }
-    } catch (err) {
-      showToast("Failed to update privacy settings.");
-    }
-  };
-
-  const handleCopyLink = () => {
-    navigator.clipboard.writeText(window.location.href);
-    setCopied(true);
-    showToast("Link copied to clipboard.");
-    setTimeout(() => setCopied(false), 2000);
-  };
-
-  const handlePrintPDF = () => {
-    window.print();
-  };
-
-  // Citation index lookup
-  const citationIndex = useMemo(() => {
+  // Citation Index Mapping
+  const citationMap = useMemo(() => {
     const map = new Map<string, any>();
-    if (report?.citation_guard_audit?.verified_citations) {
-      for (const c of report.citation_guard_audit.verified_citations) {
-        map.set(c.id, c);
-      }
+    if (!report) return map;
+
+    // Check evidence manifest
+    if (report.evidence_manifest) {
+      report.evidence_manifest.forEach((ev: any) => {
+        const id = ev.source_id || ev.id;
+        map.set(id, {
+          id,
+          title: ev.title || ev.doc_name || "Primary source",
+          url: ev.url,
+          domain: ev.domain || sourceDomain(ev.url),
+          doc_name: ev.doc_name,
+          snippet: ev.text || ev.quote || ev.snippet,
+          authority: ev.authority_score != null ? ev.authority_score * 5 : null,
+          kind: ev.doc_name ? "doc" : "web",
+          verdict: "reference_found",
+          reason: "Citation ID resolves to a retrieved passage; claim entailment was not evaluated",
+        });
+      });
     }
-    if (report?.evidence_manifest) {
-      for (const ev of report.evidence_manifest) {
-        if (!map.has(ev.source_id)) {
-          map.set(ev.source_id, {
-            id: ev.source_id,
-            title: ev.title || ev.doc_name,
-            url: ev.url,
-            doc_name: ev.doc_name,
-            source_type: ev.source_type,
-            snippet: ev.text
+
+    // Check sources list from relational store
+    if (report.sources) {
+      report.sources.forEach((s: any) => {
+        const id = s.source_id || s.id;
+        if (!map.has(id)) {
+          map.set(id, {
+            id,
+            title: s.title || s.domain,
+            url: s.url,
+            domain: s.domain,
+            authority: s.authority_tier != null ? s.authority_tier * 5 : null,
+            kind: s.kind === "user_doc" || s.kind === "doc" ? "doc" : "web",
+            snippet: s.snippet || "",
+            verdict: "reference_found",
           });
         }
-      }
+      });
     }
+
     return map;
   }, [report]);
 
-  // Breakdown chapters for Table of Contents & Chapter Pager
+  // Chapters for Left Table of Contents
   const chapters = useMemo(() => {
-    if (!report?.monograph) return [];
-    const lines = report.monograph.split("\n");
-    const result: { id: string; title: string; content: string }[] = [];
-    let currentChapter = { id: "intro", title: "Introduction & Executive Summary", content: "" };
+    const md = report?.monograph || report?.report_markdown || "";
+    if (!md) return [];
+    const lines = md.split("\n");
+    const result: { id: string; title: string }[] = [];
 
-    for (const line of lines) {
+    const seen: Record<string, number> = {};
+    lines.forEach((line: string) => {
       if (line.startsWith("## ")) {
-        if (currentChapter.content.trim()) {
-          result.push({ ...currentChapter });
-        }
-        const chapterTitle = line.replace(/^##\s+/, "").trim();
-        const chapterId = chapterTitle.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-        currentChapter = { id: chapterId, title: chapterTitle, content: line + "\n" };
-      } else {
-        currentChapter.content += line + "\n";
+        const title = line.replace(/^##\s+/, "").replace(/[`*_~]/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
+        const base = headingSlug(title);
+        const occurrence = seen[base] || 0;
+        seen[base] = occurrence + 1;
+        const id = occurrence ? `${base}-${occurrence + 1}` : base;
+        result.push({ id, title });
       }
-    }
-    if (currentChapter.content.trim()) {
-      result.push(currentChapter);
+    });
+
+    if (result.length === 0) {
+      result.push({ id: "overview", title: "Executive Intelligence Briefing" });
     }
     return result;
-  }, [report?.monograph]);
+  }, [report]);
 
-  // Open citation in Right Inspector
-  const handleCitationClick = (citationId: string) => {
-    const meta = citationIndex.get(citationId);
-    if (meta) {
-      setSelectedCitation(meta);
-      setSourceQuestion("");
-      setSourceAnswer(null);
-      setInspectorOpen(true);
+  const handleCitationClick = (citationTag: string) => {
+    const cleanTag = citationTag.replace(/[\[\]]/g, "");
+    const src = citationMap.get(cleanTag) || {
+      id: cleanTag,
+      title: `Citation [${cleanTag}]`,
+      domain: "Indexed Evidence",
+      authority: null,
+      snippet: "",
+      verdict: "unresolved",
+    };
+    setSelectedCitation(src);
+    setInspectorOpen(true);
+  };
+
+  const handleCopyMarkdown = () => {
+    const md = report?.monograph || report?.report_markdown || "";
+    navigator.clipboard.writeText(md);
+    setCopied(true);
+    showToast("Report markdown copied to clipboard.");
+    setTimeout(() => setCopied(false), 2000);
+  };
+
+  const handleShare = async () => {
+    if (sharing || typeof window === "undefined") return;
+    setSharing(true);
+    try {
+      if (!report?.is_public) {
+        if (!token) throw new Error("Sign in to enable public sharing.");
+        const response = await fetch(`${API_URL}/api/report/${reportId}/toggle-public`, {
+          method: "POST",
+          headers: { Authorization: `Bearer ${token}` },
+        });
+        const data = await response.json().catch(() => ({}));
+        if (!response.ok) throw new Error(data.detail || "Could not enable public sharing.");
+        setReport((current: any) => current ? { ...current, is_public: data.is_public } : current);
+      }
+      await navigator.clipboard.writeText(window.location.href);
+      showToast(report?.is_public ? "Public dossier link copied." : "Public sharing enabled. Link copied.");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Could not copy dossier link.");
+    } finally {
+      setSharing(false);
     }
   };
 
-  // Custom text renderer to parse inline citations [1], [2], [S1], [D1]
-  const renderTextWithCitations = (text: string) => {
-    const parts = text.split(/(\[(?:S|D)?\d+\])/g);
-    return parts.map((part, idx) => {
-      const match = part.match(/^\[((?:S|D)?\d+)\]$/);
-      if (match) {
-        const cId = match[1];
-        return (
-          <button
-            key={idx}
-            type="button"
-            onClick={() => handleCitationClick(cId)}
-            className="citation-badge"
-            title={`View primary source verification [${cId}]`}
-          >
-            [{cId}]
-          </button>
-        );
+  // Follow-up Inquiry Submission (Screen 7.5)
+  const handleFollowupSubmit = async (e: React.FormEvent) => {
+    e.preventDefault();
+    if (!followupQuery.trim() || followupLoading) return;
+
+    const q = followupQuery.trim();
+    setFollowupLoading(true);
+
+    try {
+      const res = await fetch(`${API_URL}/api/report/${reportId}/query-evidence`, {
+        method: "POST",
+        headers: {
+          "Content-Type": "application/json",
+          ...(token ? { Authorization: `Bearer ${token}` } : {}),
+        },
+        body: JSON.stringify({ question: q, selected_text: selectedFollowupText }),
+      });
+
+      if (!res.ok) {
+        const details = await res.json().catch(() => ({}));
+        throw new Error(details.detail || "Unable to answer from this report's evidence.");
       }
-      return part;
-    });
+
+      const data = await res.json();
+      setFollowupThreads((prev) => [
+        ...prev,
+        {
+          id: Date.now(),
+          question: q,
+          answer: data.answer,
+          path: data.verification_status === "verified"
+            ? "Checked against report evidence"
+            : data.status === "insufficient_evidence"
+              ? "No supporting report evidence"
+              : "Citations checked · entailment uncertain",
+          citations: data.citations || [],
+          verificationStatus: data.verification_status,
+        },
+      ]);
+      setFollowupQuery("");
+      setSelectedFollowupText("");
+    } catch (err) {
+      showToast(err instanceof Error ? err.message : "Follow-up investigation failed.");
+    } finally {
+      setFollowupLoading(false);
+    }
   };
 
-  // Custom Markdown Components for editorial reading
-  const markdownComponents = {
-    h1: ({ children }: any) => (
-      <h1 className="text-2xl sm:text-3xl font-serif font-bold tracking-tight text-[#fafaf9] mt-8 mb-4 border-b border-white/[0.08] pb-3">
-        {children}
-      </h1>
-    ),
-    h2: ({ children, node }: any) => {
-      const text = String(children);
-      const id = text.toLowerCase().replace(/[^a-z0-9]+/g, "-");
-      return (
-        <h2 id={id} className="text-xl sm:text-2xl font-serif font-semibold tracking-tight text-[#fafaf9] mt-10 mb-3 scroll-mt-24 border-b border-white/[0.06] pb-2">
-          {children}
-        </h2>
-      );
-    },
-    h3: ({ children }: any) => (
-      <h3 className="text-base sm:text-lg font-serif font-semibold text-zinc-200 mt-6 mb-2">
-        {children}
-      </h3>
-    ),
-    p: ({ children }: any) => (
-      <p className="text-[14.5px] sm:text-[15.5px] text-zinc-300 font-sans leading-[1.75] my-3.5 tracking-[-0.005em]">
-        {Array.isArray(children) 
-          ? children.map((c, i) => (typeof c === "string" ? renderTextWithCitations(c) : c))
-          : typeof children === "string" ? renderTextWithCitations(children) : children}
-      </p>
-    ),
-    table: ({ children }: any) => (
-      <div className="overflow-x-auto my-6 border border-white/[0.08] rounded-xl bg-[#12131a]">
-        <table className="w-full text-xs text-left border-collapse">{children}</table>
+  if (loading) {
+    return (
+      <div className="min-h-screen bg-[var(--paper)] flex flex-col items-center justify-center space-y-3 font-mono text-xs text-[var(--ink-3)]">
+        <span className="w-2.5 h-2.5 rounded-full bg-[var(--accent)] animate-quiet-pulse" />
+        <p>Loading research monograph...</p>
       </div>
-    ),
-    th: ({ children }: any) => (
-      <th className="border-b border-white/[0.08] p-3 text-zinc-400 font-mono font-medium uppercase tracking-wider bg-white/[0.02]">
-        {children}
-      </th>
-    ),
-    td: ({ children }: any) => (
-      <td className="border-b border-white/[0.04] p-3 text-zinc-300 font-sans">
-        {Array.isArray(children) 
-          ? children.map((c, i) => (typeof c === "string" ? renderTextWithCitations(c) : c))
-          : typeof children === "string" ? renderTextWithCitations(children) : children}
-      </td>
-    ),
-    pre: ({ children }: any) => (
-      <pre className="bg-[#12131a] border border-white/[0.08] p-4 rounded-xl overflow-x-auto text-xs font-mono text-zinc-300 my-4">
-        {children}
-      </pre>
-    ),
-    code: ({ children, className }: any) => {
-      const isInline = !className || !className.includes("language-");
-      if (isInline) {
-        return (
-          <code className="bg-white/[0.06] text-zinc-200 px-1.5 py-0.5 rounded text-xs font-mono">
-            {children}
-          </code>
-        );
-      }
-      return <code>{children}</code>;
-    },
-    blockquote: ({ children }: any) => (
-      <blockquote className="border-l-2 border-zinc-500 pl-4 py-1 my-4 text-zinc-400 italic text-sm">
-        {children}
-      </blockquote>
-    ),
-    ul: ({ children }: any) => (
-      <ul className="list-disc pl-5 space-y-1.5 my-3 text-[14.5px] text-zinc-300 leading-relaxed">
-        {children}
-      </ul>
-    ),
-    ol: ({ children }: any) => (
-      <ol className="list-decimal pl-5 space-y-1.5 my-3 text-[14.5px] text-zinc-300 leading-relaxed">
-        {children}
-      </ol>
-    ),
-    li: ({ children }: any) => (
-      <li className="pl-1">
-        {Array.isArray(children) 
-          ? children.map((c, i) => (typeof c === "string" ? renderTextWithCitations(c) : c))
-          : typeof children === "string" ? renderTextWithCitations(children) : children}
-      </li>
-    )
-  };
+    );
+  }
 
-  const executiveTitle = report?.executive_title || report?.query || "Research Investigation";
-  const sourceCount = report?.evidence_manifest?.length || report?.total_sources_cited || 0;
+  if (status === "not_found" || !report) {
+    return (
+      <div className="min-h-screen bg-[var(--paper)] text-[var(--ink)] flex flex-col font-sans">
+        <Navbar />
+        <div className="max-w-md mx-auto my-24 p-8 bg-[var(--surface)] border border-[var(--line)] rounded-[10px] text-center space-y-4">
+          <AlertTriangle className="w-6 h-6 text-[var(--warn)] mx-auto" />
+          <h2 className="font-serif text-lg font-semibold">Dossier Not Found</h2>
+          <p className="text-xs text-[var(--ink-2)]">
+            The requested research investigation #{reportId} does not exist or may have expired.
+          </p>
+          <Link href="/" className="btn-primary inline-flex text-xs">
+            Return to Desk
+          </Link>
+        </div>
+      </div>
+    );
+  }
+
+  const markdownContent = report.monograph || report.report_markdown || "";
+  const title = report.executive_title || report.query || "Research Investigation";
+  const depth = report.depth || "standard";
+  const dateStr = formatDossierDate(report.created_at);
+  const sourcesCount = report.sources?.length || report.evidence_manifest?.length || 0;
+  const renderedHeadingCounts = new Map<string, number>();
+
+  // Scores - authentically loaded from report telemetry or null if not yet evaluated
+  const scores = report.scores || (report.faithfulness_score !== undefined || report.coverage_score !== undefined ? {
+    faithfulness: report.faithfulness_score,
+    relevancy: report.relevancy_score,
+    authority: report.authority_score,
+    coverage: report.coverage_score != null ? report.coverage_score / 100 : null,
+  } : null);
+  const citationValidity = report.citation_validity_score ?? report.guard_results?.citation_validity_score ?? null;
+  const runWarnings = [
+    ...(Array.isArray(report.research_warnings) ? report.research_warnings : []),
+    ...(Array.isArray(report.provider_warnings) ? report.provider_warnings : []),
+  ].map((warning: unknown) => {
+    if (typeof warning === "string") return warning;
+    if (warning && typeof warning === "object") {
+      const item = warning as Record<string, unknown>;
+      return String(item.message || item.detail || "A research service was unavailable.");
+    }
+    return "A research service was unavailable.";
+  });
+
+  // Text size class mapping
+  const textSizeClasses = {
+    S: "text-[15px] leading-[1.65]",
+    M: "text-[18px] leading-[1.68]",
+    L: "text-[20px] leading-[1.72]",
+  };
 
   return (
-    <div className="min-h-screen bg-[#0c0d12] text-[#fafaf9] flex flex-col font-sans">
-      {/* Top Reading Progress Bar */}
-      {status === "completed" && (
-        <div 
-          className="fixed top-0 left-0 h-0.5 bg-zinc-300 z-50 transition-all duration-150 no-print"
-          style={{ width: `${scrollProgress}%` }}
-        />
-      )}
+    <div className="min-h-screen bg-[var(--paper)] text-[var(--ink)] flex flex-col font-sans selection:bg-[var(--accent-soft)]">
+      {/* ─── Reading Progress Bar (Fixed Top hairline) ───────────────── */}
+      <div
+        className="fixed top-0 left-0 h-[2px] bg-[var(--accent)] z-50 transition-all duration-100 no-print"
+        style={{ width: `${scrollProgress}%` }}
+      />
 
       <Navbar />
 
-      {/* Toast Alert */}
-      {toastMessage && (
-        <div className="fixed bottom-6 right-6 z-50 px-4 py-2.5 rounded-xl bg-[#161822] border border-white/[0.12] text-xs text-[#fafaf9] shadow-2xl animate-in fade-in slide-in-from-bottom-2 duration-150 flex items-center gap-2">
-          <CheckCircle2 className="w-3.5 h-3.5 text-zinc-300" />
-          <span>{toastMessage}</span>
-        </div>
-      )}
-
-      <main className="flex-1 max-w-[1600px] w-full mx-auto px-4 sm:px-6 py-6 md:py-8 space-y-6">
-        
-        {/* Top Breadcrumb & Actions Bar */}
-        <div className="flex flex-wrap items-center justify-between gap-4 border-b border-white/[0.08] pb-4 no-print">
-          <div className="flex items-center gap-3">
-            <a
-              href="/studio"
-              className="inline-flex items-center gap-1.5 text-xs text-zinc-400 hover:text-white transition-colors"
-            >
-              <ArrowLeft className="w-3.5 h-3.5" />
-              <span>Studio</span>
-            </a>
-            <span className="text-zinc-600">•</span>
-            <span className="text-[11px] font-mono text-zinc-400">
-              Dossier #{reportId}
-            </span>
-          </div>
-
-          <div className="flex items-center gap-2.5">
-            {/* TOC Collapse Toggle */}
-            {status === "completed" && chapters.length > 0 && (
-              <button
-                type="button"
-                onClick={() => setTocCollapsed(!tocCollapsed)}
-                className={`flex items-center gap-1.5 text-xs border px-3 py-1.5 rounded-xl transition-colors cursor-pointer ${
-                  tocCollapsed
-                    ? "bg-white/[0.04] text-zinc-400 hover:text-zinc-200 border-white/[0.08]"
-                    : "bg-white/[0.08] text-white border-white/[0.14] font-medium"
-                }`}
-                title={tocCollapsed ? "Expand Table of Contents" : "Collapse Table of Contents"}
-              >
-                {tocCollapsed ? <PanelLeftOpen className="w-3.5 h-3.5" /> : <PanelLeftClose className="w-3.5 h-3.5" />}
-                <span>TOC</span>
-              </button>
-            )}
-
-            {/* Evidence Inspector Toggle */}
-            {status === "completed" && sourceCount > 0 && (
-              <button
-                type="button"
-                onClick={() => {
-                  if (!inspectorOpen && !selectedCitation && report?.evidence_manifest?.length > 0) {
-                    const firstEv = report.evidence_manifest[0];
-                    setSelectedCitation({
-                      id: firstEv.source_id,
-                      title: firstEv.title || firstEv.doc_name,
-                      url: firstEv.url,
-                      doc_name: firstEv.doc_name,
-                      source_type: firstEv.source_type,
-                      snippet: firstEv.text
-                    });
-                  }
-                  setReadingAssistantOpen(false);
-                  setInspectorOpen(!inspectorOpen);
-                }}
-                className={`flex items-center gap-1.5 text-xs border px-3 py-1.5 rounded-xl transition-colors cursor-pointer ${
-                  inspectorOpen
-                    ? "bg-white/[0.08] text-white border-white/[0.14] font-medium"
-                    : "bg-white/[0.04] text-zinc-400 hover:text-zinc-200 border-white/[0.08]"
-                }`}
-                title={inspectorOpen ? "Hide Evidence Panel" : "Show Evidence Panel"}
-              >
-                <Database className="w-3.5 h-3.5" />
-                <span>Evidence ({sourceCount})</span>
-              </button>
-            )}
-
-            {/* View Mode Switcher */}
-            {status === "completed" && chapters.length > 1 && (
-              <div className="flex items-center bg-[#12131a] border border-white/[0.08] p-1 rounded-xl">
-                <button
-                  type="button"
-                  onClick={() => setViewMode("continuous")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
-                    viewMode === "continuous"
-                      ? "bg-white/[0.08] text-white font-semibold"
-                      : "text-zinc-400 hover:text-zinc-200"
-                  }`}
-                >
-                  <BookOpen className="w-3 h-3" />
-                  <span>Continuous</span>
-                </button>
-                <button
-                  type="button"
-                  onClick={() => setViewMode("pager")}
-                  className={`px-3 py-1 rounded-lg text-xs font-medium transition-colors cursor-pointer flex items-center gap-1.5 ${
-                    viewMode === "pager"
-                      ? "bg-white/[0.1] text-white font-semibold shadow-sm"
-                      : "text-zinc-400 hover:text-zinc-200"
-                  }`}
-                >
-                  <Hash className="w-3 h-3" />
-                  <span>Chapter Pager</span>
-                </button>
-              </div>
-            )}
-
-            {/* Share & Copy Link */}
-            <button
-              onClick={handleCopyLink}
-              className="flex items-center gap-1.5 text-xs bg-[#12131a] hover:bg-[#161822] border border-white/[0.08] px-3 py-1.5 rounded-xl text-zinc-300 transition-colors cursor-pointer"
-            >
-              {copied ? <Check className="w-3 h-3 text-zinc-200" /> : <Copy className="w-3 h-3" />}
-              <span>{copied ? "Copied" : "Share"}</span>
-            </button>
-
-            {/* Exports */}
-            {status === "completed" && (
-              <div className="flex items-center gap-1 bg-[#12131a] border border-white/[0.08] p-1 rounded-xl">
-                <button
-                  onClick={handlePrintPDF}
-                  className="px-2.5 py-1 text-xs text-zinc-300 hover:text-white hover:bg-white/10 rounded transition-colors flex items-center gap-1 cursor-pointer"
-                >
-                  <Printer className="w-3 h-3 text-zinc-400" />
-                  <span>PDF</span>
-                </button>
-                <a
-                  href={`${API_URL}/api/report/${reportId}/download/markdown`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-2 py-1 text-xs text-zinc-300 hover:text-white hover:bg-white/10 rounded transition-colors"
-                >
-                  .MD
-                </a>
-                <a
-                  href={`${API_URL}/api/report/${reportId}/download/json`}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="px-2 py-1 text-xs text-zinc-300 hover:text-white hover:bg-white/10 rounded transition-colors"
-                >
-                  .JSON
-                </a>
-              </div>
-            )}
-          </div>
-        </div>
-
-        {/* MULTI-TURN SESSION TURN CAROUSEL */}
-        {sessionData && sessionData.turns?.length > 1 && (
-          <div className="bg-[#12131a] border border-white/[0.08] rounded-xl p-3 flex items-center justify-between gap-3 overflow-x-auto no-print">
-            <div className="flex items-center gap-2 min-w-0">
-              <span className="text-[11px] font-mono text-zinc-400 uppercase font-semibold shrink-0">
-                Session Turns:
-              </span>
-              <div className="flex items-center gap-1.5 min-w-0">
-                {sessionData.turns.map((t: any) => {
-                  const isCurrent = t.id === reportId;
-                  return (
-                    <a
-                      key={t.id}
-                      href={`/report/${t.id}`}
-                      className={`px-3 py-1 rounded-lg text-xs font-mono transition-colors shrink-0 flex items-center gap-1.5 ${
-                        isCurrent
-                          ? "bg-white/[0.1] text-white font-semibold border border-white/[0.12]"
-                          : "bg-white/[0.03] text-zinc-400 hover:text-zinc-200 border border-white/[0.05]"
-                      }`}
-                    >
-                      <span>Turn 0{t.turn_index + 1}</span>
-                      <span className="text-[10px] text-zinc-500 truncate max-w-[120px]">
-                        {t.query?.slice(0, 20)}...
-                      </span>
-                    </a>
-                  );
-                })}
-              </div>
-            </div>
-
-            <a
-              href={`/studio?session_id=${sessionData.id}`}
-              className="px-3 py-1 rounded-lg bg-white/[0.06] hover:bg-white/[0.1] text-zinc-200 text-xs font-medium flex items-center gap-1 shrink-0 transition-colors"
-            >
-              <Plus className="w-3 h-3 text-zinc-400" />
-              <span>Next Turn</span>
-            </a>
-          </div>
-        )}
-
-        {/* INITIAL LOADING STATE (Prevents flash of in-flight terminal on refresh) */}
-        {initialLoading && (
-          <div className="bg-[#12131a] border border-white/[0.08] rounded-2xl p-12 text-center space-y-4 max-w-xl mx-auto my-12 animate-in fade-in duration-150">
-            <div className="w-8 h-8 border-2 border-white/20 border-t-zinc-200 rounded-full animate-spin mx-auto" />
-            <div className="space-y-1">
-              <p className="text-sm font-medium text-zinc-200">Loading Research Dossier...</p>
-              <p className="text-xs text-zinc-500 font-mono">Retrieving verified evidence and citations</p>
-            </div>
-          </div>
-        )}
-
-        {/* NOT FOUND SCREEN */}
-        {!initialLoading && status === "not_found" && (
-          <div className="bg-[#12131a] border border-white/[0.08] rounded-2xl p-10 md:p-12 text-center space-y-4 max-w-xl mx-auto my-12">
-            <div className="w-12 h-12 rounded-xl bg-white/[0.05] border border-white/[0.1] flex items-center justify-center text-zinc-300 mx-auto">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <div className="space-y-1.5">
-              <h3 className="text-lg font-bold text-[#fafaf9]">Dossier Not Found</h3>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                The requested research dossier could not be located. It may have expired or been deleted.
-              </p>
-            </div>
-            <div className="pt-2">
-              <a
-                href="/studio"
-                className="px-4 py-2 bg-zinc-200 hover:bg-white text-zinc-900 text-xs font-semibold rounded-lg inline-flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <span>Launch New Inquiry</span>
-                <ArrowUpRight className="w-3.5 h-3.5" />
-              </a>
-            </div>
-          </div>
-        )}
-
-        {/* ─── ACTIVE INVESTIGATION RUNNING TERMINAL ────────────────── */}
-        {!initialLoading && status !== "completed" && status !== "cancelled" && status !== "not_found" && (
-          <div className="bg-[#12131a] border border-white/[0.08] rounded-2xl p-6 sm:p-8 space-y-6 shadow-xl max-w-4xl mx-auto">
-            {/* Header with Inquiry and In-Flight Controls */}
-            <div className="flex flex-wrap items-start justify-between gap-4 pb-5 border-b border-white/[0.06]">
-              <div className="space-y-1.5 max-w-2xl">
-                <div className="inline-flex items-center gap-2 px-2.5 py-1 rounded-full bg-white/[0.05] border border-white/[0.08] text-[11px] font-mono text-zinc-300">
-                  <span className="w-1.5 h-1.5 rounded-full bg-zinc-300 animate-pulse" />
-                  <span>Research in progress • Web & Vault Retrieval</span>
-                  <span className="text-zinc-600">•</span>
-                  <span className="text-zinc-400">Parallel Workers</span>
-                </div>
-                <h2 className="text-xl sm:text-2xl font-serif font-bold text-[#fafaf9] tracking-tight">
-                  {report?.query || "Investigating research inquiry..."}
-                </h2>
-                <p className="text-xs text-zinc-400 font-mono flex items-center gap-2">
-                  <span className="text-zinc-500">Current Phase:</span>
-                  <span className="text-zinc-200">{stage}</span>
-                </p>
-              </div>
-
-              {/* In-Flight Controls: Edit Query & Cancel */}
-              <div className="flex items-center gap-2 shrink-0">
-                <a
-                  href={`/studio?q=${encodeURIComponent(report?.query || "")}`}
-                  className="px-3.5 py-2 bg-white/[0.05] hover:bg-white/[0.09] text-zinc-200 border border-white/[0.09] rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer"
-                  title="Pause and tweak this query in Studio"
-                >
-                  <Edit3 className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Edit Query</span>
-                </a>
-
-                <button
-                  type="button"
-                  onClick={handleCancelResearch}
-                  disabled={cancelling}
-                  className="px-3.5 py-2 bg-red-500/10 hover:bg-red-500/20 text-red-300 border border-red-500/20 rounded-lg text-xs font-medium flex items-center gap-1.5 transition-colors cursor-pointer disabled:opacity-40"
-                >
-                  <X className="w-3.5 h-3.5" />
-                  <span>{cancelling ? "Stopping..." : "Cancel"}</span>
-                </button>
-              </div>
-            </div>
-
-            {/* Subdued Progress Bar & Telemetry */}
-            <div className="space-y-2">
-              <div className="w-full bg-[#161822] h-2 rounded-full overflow-hidden border border-white/[0.06]">
-                <div 
-                  className="bg-zinc-300 h-full transition-all duration-300 rounded-full"
-                  style={{ width: `${Math.max(12, progress)}%` }}
-                />
-              </div>
-              <div className="flex items-center justify-between text-[11px] font-mono text-zinc-500 pt-0.5">
-                <span className="flex items-center gap-1.5">
-                  <Clock className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Elapsed: {elapsedSec}s</span>
-                </span>
-                <span>{progress}% Completed</span>
-              </div>
-            </div>
-
-            {/* Pipeline Stage Feed */}
-            <div className="space-y-3 pt-2">
-              <div className="flex items-center justify-between">
-                <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-semibold flex items-center gap-1.5">
-                  <Activity className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Investigation Pipeline</span>
-                </span>
-                <span className="text-[10px] font-mono text-zinc-500">Live Agent Steps</span>
-              </div>
-
-              <div className="bg-[#161822] border border-white/[0.06] rounded-xl p-4 space-y-2.5 font-mono text-xs">
-                <div className="flex items-center justify-between py-1 border-b border-white/[0.04] text-[11px]">
-                  <div className="flex items-center gap-2.5">
-                    <span className={`w-1.5 h-1.5 rounded-full ${progress >= 10 ? "bg-zinc-200" : "bg-zinc-600"}`} />
-                    <span className="text-zinc-200">1. Planning: Formulating search tracks & query decomposition</span>
-                  </div>
-                  <span className="text-zinc-400 text-[10px] font-semibold">{progress >= 35 ? "Completed" : "In Progress"}</span>
-                </div>
-
-                <div className="flex items-center justify-between py-1 border-b border-white/[0.04] text-[11px]">
-                  <div className="flex items-center gap-2.5">
-                    <span className={`w-1.5 h-1.5 rounded-full ${progress >= 35 ? "bg-zinc-200" : "bg-zinc-600"}`} />
-                    <span className="text-zinc-200">2. Retrieval: Crawling academic literature, filings & private vault</span>
-                  </div>
-                  <span className="text-zinc-400 text-[10px] font-semibold">
-                    {progress >= 60 ? "Completed" : progress >= 35 ? "In Progress" : "Pending"}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between py-1 border-b border-white/[0.04] text-[11px]">
-                  <div className="flex items-center gap-2.5">
-                    <span className={`w-1.5 h-1.5 rounded-full ${progress >= 60 ? "bg-zinc-200" : "bg-zinc-600"}`} />
-                    <span className="text-zinc-200">3. Grounding: Deduplicating content & assembling evidence index</span>
-                  </div>
-                  <span className="text-zinc-400 text-[10px] font-semibold">
-                    {progress >= 72 ? "Completed" : progress >= 60 ? "In Progress" : "Queued"}
-                  </span>
-                </div>
-
-                <div className="flex items-center justify-between py-1 text-[11px]">
-                  <div className="flex items-center gap-2.5">
-                    <span className={`w-1.5 h-1.5 rounded-full ${progress >= 72 ? "bg-zinc-200" : "bg-zinc-600"}`} />
-                    <span className="text-zinc-200">4. Synthesis: Auditing contradictions & drafting research monograph</span>
-                  </div>
-                  <span className="text-zinc-400 text-[10px] font-semibold">
-                    {progress >= 100 ? "Completed" : progress >= 72 ? "In Progress" : "Queued"}
-                  </span>
-                </div>
-              </div>
-            </div>
-          </div>
-        )}
-
-        {/* ─── CANCELLED STATE SCREEN ──────────────────────────────── */}
-        {status === "cancelled" && (
-          <div className="bg-[#12131a] border border-white/[0.08] rounded-2xl p-8 md:p-12 text-center space-y-5 shadow-2xl max-w-xl mx-auto">
-            <div className="w-12 h-12 rounded-xl bg-white/[0.05] border border-white/[0.1] flex items-center justify-center text-zinc-300 mx-auto">
-              <AlertTriangle className="w-6 h-6" />
-            </div>
-            <div className="space-y-1.5">
-              <h3 className="text-lg font-bold text-[#fafaf9]">Investigation Cancelled</h3>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                You stopped this research run before completion. You can adjust your query or launch a fresh inquiry in Studio.
-              </p>
-            </div>
-            <div className="flex flex-wrap items-center justify-center gap-2.5 pt-2">
-              <a
-                href={`/studio?q=${encodeURIComponent(report?.query || "")}`}
-                className="px-4 py-2 bg-zinc-200 hover:bg-white text-zinc-900 text-xs font-semibold rounded-lg flex items-center gap-1.5 transition-colors cursor-pointer"
-              >
-                <span>Edit Query & Re-Scope</span>
-                <ArrowUpRight className="w-3.5 h-3.5" />
-              </a>
-              <a
-                href="/studio"
-                className="px-4 py-2 bg-white/[0.04] hover:bg-white/[0.08] border border-white/[0.08] text-zinc-300 text-xs font-semibold rounded-lg transition-colors cursor-pointer"
-              >
-                Start Over
-              </a>
-            </div>
-          </div>
-        )}
-
-        {/* ─── COMPLETED DOSSIER: 3-PANE RESEARCH WORKBENCH ────────── */}
-        {status === "completed" && report && (
-          <div className="space-y-6" id="dossier-reading-canvas">
-            
-            {/* Publication Header */}
-            <div className="bg-[#12131a] border border-white/[0.08] rounded-2xl p-6 sm:p-8 space-y-4">
-              <div className="space-y-2">
-                <span className="text-[11px] font-mono px-2.5 py-0.5 rounded bg-white/[0.06] text-zinc-300 border border-white/[0.1] font-semibold uppercase tracking-wider">
-                  RESEARCH DOSSIER
-                </span>
-                <h1 className="text-2xl sm:text-3xl md:text-4xl font-serif font-bold text-[#fafaf9] tracking-tight leading-[1.2]">
-                  {executiveTitle}
-                </h1>
-                {report.query && (
-                  <p className="text-xs sm:text-sm text-zinc-400 font-sans italic border-l-2 border-zinc-600 pl-3">
-                    Hypothesis: &ldquo;{report.query}&rdquo;
-                  </p>
-                )}
-              </div>
-
-              {/* Quiet Metadata Bar */}
-              <div className="flex flex-wrap items-center justify-between gap-3 pt-3 border-t border-white/[0.06] text-xs text-zinc-400 font-mono">
-                <div className="flex flex-wrap items-center gap-3">
-                  <span className="text-zinc-300 font-semibold">
-                    {sourceCount} Verified Sources
-                  </span>
-                  <span>•</span>
-                  <span>Dual Corpus (Web + Vault)</span>
-                  <span>•</span>
-                  <span>
-                    {Math.max(1, Math.ceil(((report?.monograph || report?.report_markdown || "").trim().split(/\s+/).filter(Boolean).length || 800) / 220))} min read
-                  </span>
-                </div>
-
-                <div className="flex items-center gap-2">
-                  <button
-                    type="button"
-                    onClick={handleTogglePublic}
-                    className="flex items-center gap-1.5 px-2.5 py-1 rounded-lg bg-white/[0.04] hover:bg-white/[0.08] text-stone-300 text-[11px] border border-white/[0.06] transition-colors cursor-pointer"
-                  >
-                    {isPublic ? <Globe className="w-3 h-3 text-stone-300" /> : <Lock className="w-3 h-3 text-stone-400" />}
-                    <span>{isPublic ? "Public Share: ON" : "Private Dossier"}</span>
-                  </button>
-                </div>
-              </div>
-            </div>
-
-            {/* 3-PANE LAYOUT: Left TOC + Center Reading Canvas + Right Evidence Inspector */}
-            <div className="grid grid-cols-1 lg:grid-cols-12 gap-8 items-start">
-              
-              {/* MOBILE TOC OVERLAY DRAWER */}
-              {!tocCollapsed && (
-                <div className="fixed inset-0 z-50 bg-black/80 backdrop-blur-md lg:hidden flex no-print animate-in fade-in duration-150">
-                  <div className="w-80 max-w-[85vw] bg-[#12131a] border-r border-white/[0.1] h-full p-5 space-y-4 overflow-y-auto shadow-2xl animate-in slide-in-from-left duration-200">
-                    <div className="flex items-center justify-between pb-3 border-b border-white/[0.08]">
-                      <div className="space-y-0.5">
-                        <span className="text-[10px] font-mono text-zinc-400 uppercase font-semibold">
-                          Navigation
-                        </span>
-                        <h3 className="text-sm font-serif font-bold text-zinc-100">Table of Contents</h3>
-                      </div>
-                      <button
-                        type="button"
-                        onClick={() => setTocCollapsed(true)}
-                        className="p-1.5 rounded-lg text-zinc-400 hover:text-white hover:bg-white/[0.08] cursor-pointer transition-colors"
-                        title="Close Table of Contents"
-                      >
-                        <X className="w-4 h-4" />
-                      </button>
-                    </div>
-
-                    <nav className="space-y-1">
-                      {chapters.map((ch, idx) => (
-                        <button
-                          key={ch.id}
-                          type="button"
-                          onClick={() => {
-                            if (viewMode === "pager") {
-                              setActiveChapterIdx(idx);
-                            } else {
-                              const el = document.getElementById(ch.id);
-                              if (el) el.scrollIntoView({ behavior: "smooth" });
-                            }
-                            setTocCollapsed(true);
-                          }}
-                          className={`w-full text-left px-3 py-2 rounded-lg text-xs transition-colors truncate block ${
-                            (viewMode === "pager" && activeChapterIdx === idx)
-                              ? "bg-white/[0.08] text-zinc-100 border border-white/[0.1] font-semibold"
-                              : "text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]"
-                          }`}
-                        >
-                          {ch.title}
-                        </button>
-                      ))}
-                    </nav>
-                  </div>
-                  <div className="flex-1" onClick={() => setTocCollapsed(true)} />
-                </div>
-              )}
-
-              {/* LEFT RAIL: Reading TOC (Desktop) */}
-              {!tocCollapsed && (
-                <aside className="hidden lg:block lg:col-span-3 sticky top-24 space-y-4 no-print animate-in fade-in duration-150">
-                  <div className="bg-[#12131a] border border-white/[0.08] rounded-xl p-4 space-y-3">
-                    <div className="flex items-center justify-between pb-2 border-b border-white/[0.06]">
-                      <span className="text-[11px] font-mono text-zinc-400 uppercase font-semibold">
-                        Table of Contents
-                      </span>
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-mono text-zinc-500">
-                          {chapters.length} sections
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setTocCollapsed(true)}
-                          className="p-1 rounded hover:bg-white/[0.06] text-zinc-400 hover:text-white cursor-pointer transition-colors"
-                          title="Collapse Table of Contents"
-                        >
-                          <PanelLeftClose className="w-3.5 h-3.5" />
-                        </button>
-                      </div>
-                    </div>
-
-                    <nav className="space-y-1 max-h-[60vh] overflow-y-auto pr-1">
-                      {chapters.map((ch, idx) => (
-                        <button
-                          key={ch.id}
-                          type="button"
-                          onClick={() => {
-                            if (viewMode === "pager") {
-                              setActiveChapterIdx(idx);
-                            } else {
-                              const el = document.getElementById(ch.id);
-                              if (el) el.scrollIntoView({ behavior: "smooth" });
-                            }
-                          }}
-                          className={`w-full text-left px-2.5 py-1.5 rounded-lg text-xs transition-colors truncate block ${
-                            (viewMode === "pager" && activeChapterIdx === idx)
-                              ? "bg-white/[0.08] text-zinc-100 border border-white/[0.1] font-semibold"
-                              : "text-zinc-400 hover:text-zinc-200 hover:bg-white/[0.04]"
-                          }`}
-                        >
-                          {ch.title}
-                        </button>
-                      ))}
-                    </nav>
-                  </div>
-                </aside>
-              )}
-
-              {/* CENTER READING CANVAS */}
-              <article className={`
-                ${tocCollapsed
-                  ? (inspectorOpen || readingAssistantOpen ? "lg:col-span-8" : "lg:col-span-12")
-                  : (inspectorOpen || readingAssistantOpen ? "lg:col-span-6" : "lg:col-span-9")
-                } min-w-0 space-y-6 transition-all duration-200
-              `}>
-                <div className="bg-[#12131a] border border-white/[0.08] rounded-xl p-6 sm:p-10 shadow-xl">
-                  {viewMode === "pager" && chapters.length > 0 ? (
-                    <div className="space-y-6">
-                      <div className="flex items-center justify-between pb-4 border-b border-white/[0.06]">
-                        <span className="text-xs font-mono text-stone-400 font-semibold uppercase">
-                          Chapter {activeChapterIdx + 1} of {chapters.length}
-                        </span>
-                        <div className="flex items-center gap-1.5">
-                          <button
-                            type="button"
-                            disabled={activeChapterIdx === 0}
-                            onClick={() => setActiveChapterIdx(i => Math.max(0, i - 1))}
-                            className="p-1 rounded-lg bg-white/[0.04] disabled:opacity-30 text-stone-300 hover:text-white cursor-pointer"
-                          >
-                            <ChevronLeft className="w-4 h-4" />
-                          </button>
-                          <button
-                            type="button"
-                            disabled={activeChapterIdx === chapters.length - 1}
-                            onClick={() => setActiveChapterIdx(i => Math.min(chapters.length - 1, i + 1))}
-                            className="p-1 rounded-lg bg-white/[0.04] disabled:opacity-30 text-stone-300 hover:text-white cursor-pointer"
-                          >
-                            <ChevronRight className="w-4 h-4" />
-                          </button>
-                        </div>
-                      </div>
-
-                      <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                        {chapters[activeChapterIdx]?.content || ""}
-                      </ReactMarkdown>
-                    </div>
-                  ) : (
-                    <ReactMarkdown remarkPlugins={[remarkGfm]} components={markdownComponents}>
-                      {report?.monograph || report?.report_markdown || "No monograph content generated."}
-                    </ReactMarkdown>
-                  )}
-                </div>
-
-                {/* BOTTOM ACTION BAR: Follow-Up Inquiry & Addendums */}
-                <div className="bg-[#12131a] border border-white/[0.08] rounded-xl p-5 sm:p-7 space-y-4 shadow-xl no-print">
-                  <div className="space-y-1">
-                    <span className="text-[11px] font-mono text-zinc-400 uppercase font-semibold">
-                      Follow-Up Investigation
-                    </span>
-                    <h3 className="text-base font-serif font-bold text-[#fafaf9]">
-                      Explore a specific follow-up angle
-                    </h3>
-                  </div>
-
-                  <form
-                    onSubmit={(e) => {
-                      e.preventDefault();
-                      handleCreateAddendum(addendumInquiry);
-                    }}
-                    className="flex gap-2"
-                  >
-                    <input
-                      type="text"
-                      value={addendumInquiry}
-                      onChange={(e) => setAddendumInquiry(e.target.value)}
-                      placeholder="e.g. Compare real-world degradation under extreme winter conditions..."
-                      className="flex-1 bg-[#161822] border border-white/[0.08] focus:border-white/[0.22] rounded-lg px-4 py-2 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none font-sans"
-                    />
-                    <button
-                      type="submit"
-                      disabled={addendumLoading || !addendumInquiry.trim()}
-                      className="px-4 py-2 bg-zinc-200 hover:bg-white disabled:opacity-40 text-zinc-900 rounded-lg text-xs font-semibold transition-all flex items-center gap-1.5 cursor-pointer shrink-0"
-                    >
-                      {addendumLoading ? (
-                        <>
-                          <Loader2 className="w-3.5 h-3.5 animate-spin" />
-                          <span>Investigating...</span>
-                        </>
-                      ) : (
-                        <>
-                          <span>Investigate</span>
-                          <Send className="w-3.5 h-3.5" />
-                        </>
-                      )}
-                    </button>
-                  </form>
-
-                  {/* Proactive Trajectory Chips */}
-                  {report?.suggested_inquiries?.length > 0 && (
-                    <div className="pt-2 border-t border-white/[0.05] space-y-1.5">
-                      <span className="text-[10px] font-mono text-zinc-500 uppercase">
-                        Suggested exploration angles:
-                      </span>
-                      <div className="flex flex-wrap gap-1.5">
-                        {report.suggested_inquiries.map((chip: string, i: number) => (
-                          <button
-                            key={i}
-                            type="button"
-                            onClick={() => {
-                              setAddendumInquiry(chip);
-                              handleCreateAddendum(chip);
-                            }}
-                            className="text-left px-2.5 py-1 rounded-lg bg-white/[0.03] hover:bg-white/[0.07] border border-white/[0.05] text-[11px] text-zinc-400 hover:text-zinc-200 transition-colors cursor-pointer"
-                          >
-                            + {chip}
-                          </button>
-                        ))}
-                      </div>
-                    </div>
-                  )}
-                </div>
-              </article>
-
-              {/* RIGHT RAIL: Evidence Inspector & Reading Assistant Drawer */}
-              {(inspectorOpen || readingAssistantOpen) && (
-                <aside className="lg:col-span-3 sticky top-24 space-y-4 no-print animate-in fade-in slide-in-from-right-4 duration-200">
-                  {/* EVIDENCE INSPECTOR */}
-                  {inspectorOpen && selectedCitation && (
-                    <div className="bg-[#12131a] border border-white/[0.08] rounded-xl p-5 space-y-4 shadow-2xl">
-                      <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
-                        <div className="flex items-center gap-2">
-                          <span className="citation-badge">
-                            [{selectedCitation.id}]
-                          </span>
-                          <span className="text-xs font-semibold text-[#fafaf9] truncate max-w-[140px]">
-                            {selectedCitation.source_type === "user_doc" ? "Vault Document" : "Web Citation"}
-                          </span>
-                        </div>
-                        <button
-                          type="button"
-                          onClick={() => setInspectorOpen(false)}
-                          className="p-1 rounded-lg text-zinc-400 hover:text-white cursor-pointer"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      <div className="space-y-2 text-xs">
-                        <p className="font-semibold text-[#fafaf9] leading-snug">
-                          {selectedCitation.title}
-                        </p>
-                        {selectedCitation.url && (
-                          <a
-                            href={selectedCitation.url}
-                            target="_blank"
-                            rel="noreferrer"
-                            className="text-[11px] text-zinc-300 hover:underline flex items-center gap-1 truncate block font-mono"
-                          >
-                            <span>{selectedCitation.url}</span>
-                            <ArrowUpRight className="w-3 h-3 shrink-0" />
-                          </a>
-                        )}
-                        {selectedCitation.snippet && (
-                          <div className="bg-[#161822] p-3 rounded-lg border border-white/[0.06] text-[11px] text-zinc-300 italic leading-relaxed max-h-48 overflow-y-auto">
-                            &ldquo;{selectedCitation.snippet}&rdquo;
-                          </div>
-                        )}
-                      </div>
-
-                      {/* Source Interrogation Q&A */}
-                      <form onSubmit={handleQuerySource} className="space-y-2 pt-2 border-t border-white/[0.06]">
-                        <span className="text-[10px] font-mono text-zinc-400 uppercase font-semibold block">
-                          Ask about this source:
-                        </span>
-                        <div className="flex gap-1.5">
-                          <input
-                            type="text"
-                            value={sourceQuestion}
-                            onChange={(e) => setSourceQuestion(e.target.value)}
-                            placeholder="e.g. What sample size was tested?"
-                            className="flex-1 bg-[#161822] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none"
-                          />
-                          <button
-                            type="submit"
-                            disabled={sourceLoading || !sourceQuestion.trim()}
-                            className="p-1.5 bg-zinc-200 hover:bg-white text-zinc-900 disabled:opacity-40 rounded-lg cursor-pointer shrink-0"
-                          >
-                            <Send className="w-3.5 h-3.5" />
-                          </button>
-                        </div>
-                      </form>
-
-                      {sourceAnswer && (
-                        <div className="bg-white/[0.04] border border-white/[0.08] p-3 rounded-lg text-xs text-zinc-200 space-y-1">
-                          <span className="text-[10px] font-mono text-zinc-400 font-semibold block uppercase">
-                            Source Audit Answer:
-                          </span>
-                          <p className="leading-relaxed">{sourceAnswer}</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-
-                  {/* READING ASSISTANT (Highlight Q&A) */}
-                  {readingAssistantOpen && (
-                    <div className="bg-[#12131a] border border-white/[0.08] rounded-xl p-5 space-y-4 shadow-2xl">
-                      <div className="flex items-center justify-between pb-3 border-b border-white/[0.06]">
-                        <span className="text-xs font-mono text-zinc-400 uppercase font-semibold">
-                          Reading Assistant
-                        </span>
-                        <button
-                          type="button"
-                          onClick={() => setReadingAssistantOpen(false)}
-                          className="p-1 rounded-lg text-zinc-400 hover:text-white cursor-pointer"
-                        >
-                          <X className="w-4 h-4" />
-                        </button>
-                      </div>
-
-                      <div className="space-y-1.5 text-xs">
-                        <span className="text-[10px] font-mono text-zinc-500">Selected Passage:</span>
-                        <div className="bg-[#161822] p-3 rounded-lg border border-white/[0.06] text-[11px] text-zinc-300 italic max-h-36 overflow-y-auto leading-relaxed">
-                          &ldquo;{assistantSelectedText}&rdquo;
-                        </div>
-                      </div>
-
-                      <form onSubmit={handleAskReadingAssistant} className="space-y-2">
-                        <span className="text-[10px] font-mono text-zinc-400 uppercase font-semibold block">
-                          What would you like clarified?
-                        </span>
-                        <div className="flex gap-1.5">
-                          <input
-                            type="text"
-                            value={highlightQuestion}
-                            onChange={(e) => setHighlightQuestion(e.target.value)}
-                            placeholder="e.g. Explain this concept simply..."
-                            className="flex-1 bg-[#161822] border border-white/[0.08] rounded-lg px-2.5 py-1.5 text-xs text-zinc-100 placeholder-zinc-500 focus:outline-none"
-                          />
-                          <button
-                            type="submit"
-                            disabled={highlightLoading || !highlightQuestion.trim()}
-                            className="p-1.5 bg-zinc-200 hover:bg-white text-zinc-900 disabled:opacity-40 rounded-lg cursor-pointer shrink-0"
-                          >
-                            {highlightLoading ? <Loader2 className="w-3.5 h-3.5 animate-spin" /> : <Send className="w-3.5 h-3.5" />}
-                          </button>
-                        </div>
-                      </form>
-
-                      {highlightLoading && (
-                        <div className="bg-white/[0.04] border border-white/[0.08] p-3 rounded-lg text-xs text-zinc-300 flex items-center gap-2">
-                          <Loader2 className="w-3.5 h-3.5 animate-spin text-zinc-400" />
-                          <span>Interrogating passage and evidence...</span>
-                        </div>
-                      )}
-
-                      {highlightAnswer && !highlightLoading && (
-                        <div className="bg-white/[0.04] border border-white/[0.08] p-3 rounded-lg text-xs text-zinc-200 space-y-1">
-                          <span className="text-[10px] font-mono text-zinc-400 font-semibold block uppercase">
-                            Explanation:
-                          </span>
-                          <p className="leading-relaxed whitespace-pre-line">{highlightAnswer}</p>
-                        </div>
-                      )}
-                    </div>
-                  )}
-                </aside>
-              )}
-            </div>
-          </div>
-        )}
-      </main>
-
-      {/* FLOATING TEXT SELECTION TOOLBAR */}
-      {floatingMenu && (
-        <div
-          ref={floatingMenuRef}
-          onMouseDown={(e) => {
-            e.preventDefault();
-            e.stopPropagation();
-          }}
-          className="fixed z-50 transform -translate-x-1/2 no-print flex items-center gap-1.5 p-1 rounded-full bg-[#161822] border border-white/[0.14] shadow-2xl backdrop-blur-xl animate-in fade-in zoom-in-95 duration-150"
-          style={{ left: floatingMenu.x, top: floatingMenu.y }}
-        >
-          <button
-            type="button"
-            onClick={() => handleOpenReadingAssistant("Explain this concept and its significance in clear terms.")}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
-            title="Generate concise explanation of highlighted text"
-          >
-            <Sparkles className="w-3.5 h-3.5 text-zinc-400" />
-            <span>Explain</span>
-          </button>
-
-          <span className="text-zinc-600 text-[11px]">|</span>
-
-          <button
-            type="button"
-            onClick={() => handleOpenReadingAssistant("What evidence and sources support this specific claim?")}
-            className="flex items-center gap-1.5 px-3 py-1 rounded-full text-xs font-medium text-zinc-200 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
-            title="Inspect evidence corroborating this claim"
-          >
-            <Search className="w-3.5 h-3.5 text-zinc-400" />
-            <span>Find Evidence</span>
-          </button>
-
-          <span className="text-zinc-600 text-[11px]">|</span>
-
-          <button
-            type="button"
-            onClick={() => handleOpenReadingAssistant()}
-            className="flex items-center gap-1.5 px-2.5 py-1 rounded-full text-xs font-medium text-zinc-400 hover:text-white hover:bg-white/[0.08] transition-colors cursor-pointer"
-            title="Ask custom question"
-          >
-            <MessageSquare className="w-3.5 h-3.5 text-zinc-400" />
-            <span>Ask...</span>
-          </button>
-        </div>
-      )}
-
-      {/* FLOATING RESTORE TOC BUTTON */}
-      {status === "completed" && chapters.length > 0 && tocCollapsed && (
+      {floatingSelection && (
         <button
           type="button"
-          onClick={() => setTocCollapsed(false)}
-          className="fixed bottom-6 left-6 z-40 px-3.5 py-2 rounded-full bg-[#161822] border border-white/[0.14] text-xs text-zinc-300 hover:text-white shadow-2xl flex items-center gap-2 backdrop-blur-xl transition-all cursor-pointer hover:border-white/30 animate-in fade-in zoom-in-95 duration-150 no-print"
-          title="Open Table of Contents"
+          onMouseDown={(event) => event.preventDefault()}
+          onClick={() => {
+            setSelectedFollowupText(floatingSelection.text);
+            setFollowupQuery((current) => current || "How does this passage relate to the report?");
+            setFloatingSelection(null);
+            followupInputRef.current?.focus();
+          }}
+          className="fixed z-[60] -translate-x-1/2 rounded-full border border-[var(--line)] bg-[var(--ink)] px-3.5 py-2 text-xs font-medium text-[var(--paper)] shadow-lg hover:opacity-90"
+          style={{
+            left: Math.max(100, Math.min(floatingSelection.x, window.innerWidth - 100)),
+            top: Math.max(72, floatingSelection.y),
+          }}
         >
-          <PanelLeftOpen className="w-3.5 h-3.5 text-zinc-400" />
-          <span>Table of Contents</span>
+          Ask Ada about this
         </button>
       )}
+
+      {/* Toast Notification */}
+      {toastMsg && (
+        <div className="fixed bottom-6 right-6 z-50 px-4 py-2 bg-[var(--surface)] border border-[var(--line)] rounded-[6px] text-xs text-[var(--ink)] shadow-lg flex items-center gap-2">
+          <CheckCircle2 className="w-3.5 h-3.5 text-[var(--ok)]" />
+          <span>{toastMsg}</span>
+        </div>
+      )}
+
+      {/* ─── Screen 7.4 Sticky 40px Toolbar ──────────────────────────── */}
+      <div className="sticky top-0 z-30 h-10 bg-[var(--surface)] hairline-b px-6 flex items-center justify-between text-xs text-[var(--ink-2)] no-print">
+        <div className="flex items-center gap-3">
+          <button
+            type="button"
+            onClick={() => router.push("/studio")}
+            className="flex items-center gap-1.5 text-[var(--ink-3)] hover:text-[var(--ink)] transition-colors"
+          >
+            <ArrowLeft className="w-3.5 h-3.5" />
+            <span>Desk</span>
+          </button>
+          <span className="text-[var(--line-strong)]">·</span>
+          <span className="font-mono text-[11px] text-[var(--ink-3)]">
+            #{reportId}
+          </span>
+        </div>
+
+        {/* Center / Right Toolbar Controls */}
+        <div className="flex items-center gap-2.5">
+          {/* Citation reference display */}
+          <button
+            type="button"
+            onClick={() => setShowVerification(!showVerification)}
+            className={`chip text-xs py-1 px-2.5 transition-all ${
+              showVerification ? "chip-active" : ""
+            }`}
+            title="Explain what the citation reference check measures."
+          >
+            <ShieldCheck className="w-3.5 h-3.5" />
+            <span>Citation check method</span>
+          </button>
+          {showVerification && (
+            <span className="hidden xl:inline max-w-[300px] text-[10px] text-[var(--ink-3)]">
+              Citation IDs are checked against retrieved sources; claim support is not scored.
+            </span>
+          )}
+
+          {/* Text Size Control (S, M, L) */}
+          <div className="hidden sm:inline-flex items-center border border-[var(--line)] rounded-[4px] bg-[var(--surface-2)] p-0.5 font-mono text-[11px]">
+            {(["S", "M", "L"] as const).map((sz) => (
+              <button
+                key={sz}
+                type="button"
+                onClick={() => setTextSize(sz)}
+                className={`px-2 py-0.5 rounded-[3px] transition-colors ${
+                  textSize === sz
+                    ? "bg-[var(--surface)] text-[var(--ink)] font-bold shadow-xs"
+                    : "text-[var(--ink-3)] hover:text-[var(--ink)]"
+                }`}
+              >
+                {sz}
+              </button>
+            ))}
+          </div>
+
+          <span className="text-[var(--line-strong)] hidden sm:inline">·</span>
+
+          {/* Copy Markdown */}
+          <button
+            type="button"
+            onClick={handleCopyMarkdown}
+            className="p-1.5 text-[var(--ink-3)] hover:text-[var(--ink)] rounded transition-colors"
+            title="Copy as Markdown"
+          >
+            {copied ? <Check className="w-3.5 h-3.5 text-[var(--ok)]" /> : <Copy className="w-3.5 h-3.5" />}
+          </button>
+
+          {/* Print PDF */}
+          <button
+            type="button"
+            onClick={() => window.print()}
+            className="p-1.5 text-[var(--ink-3)] hover:text-[var(--ink)] rounded transition-colors"
+            title="Print or Save as PDF"
+          >
+            <Printer className="w-3.5 h-3.5" />
+          </button>
+
+          {/* Share */}
+          <button
+            type="button"
+            onClick={handleShare}
+            className="p-1.5 text-[var(--ink-3)] hover:text-[var(--ink)] rounded transition-colors"
+            title={report?.is_public ? "Copy public dossier link" : "Enable public sharing and copy link"}
+          >
+            <Share2 className="w-3.5 h-3.5" />
+          </button>
+        </div>
+      </div>
+
+      {/* ─── Screen 7.4 Three-Column Layout ───────────────────────────── */}
+      <div className="flex-1 max-w-[1440px] w-full mx-auto px-6 py-10 flex gap-10 justify-between items-start">
+        {/* ── Column 1: CONTENTS (Left, 220px, sticky, collapses < 960px) ─ */}
+        <nav className="hidden lg:block w-[220px] shrink-0 sticky top-20 space-y-3 font-sans text-xs">
+          <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold block pb-1 border-b border-[var(--line)]">
+            Contents
+          </span>
+
+          <div className="space-y-1.5">
+            {chapters.map((ch) => {
+              const isActive = activeSectionId === ch.id;
+              return (
+                <a
+                  key={ch.id}
+                  href={`#${ch.id}`}
+                  className={`block py-1 pl-2.5 transition-all truncate text-xs ${
+                    isActive
+                      ? "border-l-2 border-[var(--accent)] font-semibold text-[var(--ink)]"
+                      : "border-l-2 border-transparent text-[var(--ink-3)] hover:text-[var(--ink-2)]"
+                  }`}
+                >
+                  {ch.title}
+                </a>
+              );
+            })}
+          </div>
+
+          <div className="pt-4 border-t border-[var(--line)] space-y-2">
+            <a
+              href="#sources"
+              className="text-xs font-mono text-[var(--ink-3)] hover:text-[var(--accent)] block"
+            >
+              Primary Sources ({sourcesCount}) →
+            </a>
+          </div>
+        </nav>
+
+        {/* ── Column 2: CENTER READING COLUMN (Max 68ch) ─────────────── */}
+        <article className="flex-1 max-w-[68ch] mx-auto w-full space-y-8">
+          {/* Article Header (Display Title & Byline) */}
+          <header className="space-y-3 pb-6 border-b border-[var(--line)]">
+            <h1 className="font-serif text-[32px] sm:text-[36px] font-semibold text-[var(--ink)] leading-[1.18] tracking-tight">
+              {title}
+            </h1>
+
+            <div className="flex flex-wrap items-center gap-2 text-xs font-mono text-[var(--ink-3)]">
+              <span className="capitalize">{depth} mode</span>
+              <span>·</span>
+              <span>{dateStr}</span>
+              <span>·</span>
+              <span>{sourcesCount} primary sources</span>
+              <span>·</span>
+              <span>Source-linked report</span>
+            </div>
+          </header>
+
+          {runWarnings.length > 0 && (
+            <aside role="status" className="rounded-lg border border-amber-300/50 bg-amber-50/70 px-4 py-3 text-sm text-amber-950">
+              <div className="font-semibold">Some research sources or services were unavailable</div>
+              <ul className="mt-1 list-disc space-y-1 pl-5 text-xs">
+                {Array.from(new Set(runWarnings)).map((warning: string, index: number) => <li key={`${index}-${warning}`}>{warning}</li>)}
+              </ul>
+            </aside>
+          )}
+
+          {/* Monograph Body rendered with Markdown & Citations */}
+          <div className={`font-serif ${textSizeClasses[textSize]} text-[var(--ink)] leading-[1.68] space-y-6 monograph-prose`}>
+            <ReactMarkdown
+              remarkPlugins={[remarkGfm]}
+              components={{
+                h2: ({ children }) => {
+                  const titleText = headingText(children);
+                  const base = headingSlug(titleText);
+                  const occurrence = renderedHeadingCounts.get(base) || 0;
+                  renderedHeadingCounts.set(base, occurrence + 1);
+                  const id = occurrence ? `${base}-${occurrence + 1}` : base;
+                  return (
+                    <h2
+                      id={id}
+                      className="font-serif text-[24px] font-semibold text-[var(--ink)] pt-10 pb-2 mt-8 border-t border-[var(--line)] scroll-mt-16 leading-snug"
+                    >
+                      {children}
+                    </h2>
+                  );
+                },
+                h3: ({ children }) => (
+                  <h3 className="font-serif text-[19px] font-semibold text-[var(--ink)] pt-6 pb-1 leading-snug">
+                    {children}
+                  </h3>
+                ),
+                p: ({ children }) => {
+                  return (
+                    <p className="my-4 leading-[1.68]">
+                      {React.Children.map(children, (child) => {
+                        if (typeof child === "string") {
+                          // Match inline citation tags like [S1], [D2]
+                          const parts = child.split(/(\[(?:S|D)?\d+\])/g);
+                          return parts.map((part, pIdx) => {
+                            const match = part.match(/^\[((?:S|D)?\d+)\]$/);
+                            if (match) {
+                              const tag = match[1];
+                              return (
+                                <button
+                                  key={pIdx}
+                                  type="button"
+                                  onClick={() => handleCitationClick(tag)}
+                                  className="citation-badge"
+                                  title={`View citation [${tag}]`}
+                                >
+                                  [{tag}]
+                                </button>
+                              );
+                            }
+
+                            return part;
+                          });
+                        }
+                        return child;
+                      })}
+                    </p>
+                  );
+                },
+                blockquote: ({ children }) => (
+                  <blockquote className="border-l-2 border-[var(--accent)] pl-4 py-1 my-6 font-serif italic text-[var(--ink-2)] bg-transparent">
+                    {children}
+                  </blockquote>
+                ),
+                table: ({ children }) => (
+                  <div className="my-8 overflow-x-auto border border-[var(--line)] rounded-[6px] bg-[var(--surface)]">
+                    <table className="w-full text-left font-sans text-xs">
+                      {children}
+                    </table>
+                  </div>
+                ),
+                thead: ({ children }) => (
+                  <thead className="bg-[var(--surface-2)] font-mono text-[11px] uppercase text-[var(--ink-3)] border-b border-[var(--line)]">
+                    {children}
+                  </thead>
+                ),
+                th: ({ children }) => (
+                  <th className="py-2.5 px-3.5 font-semibold text-[var(--ink-2)]">
+                    {children}
+                  </th>
+                ),
+                td: ({ children }) => (
+                  <td className="py-2.5 px-3.5 border-t border-[var(--line)] font-mono text-[12px] text-[var(--ink)]">
+                    {children}
+                  </td>
+                ),
+              }}
+            >
+              {markdownContent}
+            </ReactMarkdown>
+          </div>
+
+          {/* ─── Screen 7.5 Docked Follow-Up Panel ─────────────────────── */}
+          <section className="pt-12 border-t border-[var(--line)] space-y-4 no-print">
+            <div className="flex items-center justify-between">
+              <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold">
+                Follow-Up Inquiry & Clarifications
+              </span>
+            </div>
+
+            {selectedFollowupText && (
+              <div className="flex items-start justify-between gap-3 rounded border border-[var(--line)] bg-[var(--surface-2)]/40 px-3 py-2 text-xs text-[var(--ink-2)]">
+                <span className="line-clamp-2">Asking about: “{selectedFollowupText}”</span>
+                <button type="button" onClick={() => setSelectedFollowupText("")} className="shrink-0 text-[var(--ink-3)] hover:text-[var(--ink)]">Clear</button>
+              </div>
+            )}
+
+            {/* Existing Followup Answers */}
+            {followupThreads.map((thread) => (
+              <div
+                key={thread.id}
+                className="p-4 rounded-[6px] border border-[var(--line)] bg-[var(--surface-2)]/40 border-l-2 border-l-[var(--accent)] space-y-2"
+              >
+                <div className="flex items-center justify-between text-xs">
+                  <span className="font-bold text-[var(--ink)]">&ldquo;{thread.question}&rdquo;</span>
+                  <span className="text-[10px] font-mono text-[var(--ink-3)]">{thread.path}</span>
+                </div>
+                <p className="font-serif text-sm text-[var(--ink-2)] leading-relaxed">
+                  {thread.answer}
+                </p>
+                {thread.citations.length > 0 && (
+                  <div className="flex flex-wrap gap-1.5 pt-1">
+                    {thread.citations.map((tag: string) => (
+                      <button key={`${thread.id}-${tag}`} type="button" onClick={() => handleCitationClick(tag)} className="citation-badge" title={`Inspect source [${tag}]`}>
+                        [{tag}]
+                      </button>
+                    ))}
+                  </div>
+                )}
+              </div>
+            ))}
+
+            {/* Input Bar */}
+            <form onSubmit={handleFollowupSubmit} className="flex gap-2">
+              <input
+                ref={followupInputRef}
+                type="text"
+                value={followupQuery}
+                onChange={(e) => setFollowupQuery(e.target.value)}
+                placeholder="Ask a follow-up about this report..."
+                className="input-base flex-1 px-3.5 py-2 text-xs bg-[var(--surface)]"
+              />
+              <button
+                type="submit"
+                disabled={!followupQuery.trim() || followupLoading}
+                className="btn-primary text-xs"
+              >
+                {followupLoading ? "Checking evidence..." : "Ask"}
+              </button>
+            </form>
+          </section>
+        </article>
+
+        {/* ── Column 3: SCORES PANEL (Right, 280px, collapses < 1200px) ─ */}
+        <aside className="hidden xl:block w-[280px] shrink-0 sticky top-20 space-y-6 font-sans">
+          {/* Quality Scores Card */}
+          <div className="p-4 rounded-[10px] bg-[var(--surface)] border border-[var(--line)] space-y-4">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold block">
+              Evidence Signals
+            </span>
+
+            {scores ? (
+              <>
+                <div className="space-y-3 font-mono text-xs">
+                  {/* Claim entailment */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-[var(--ink-2)]">Claims supported</span>
+                      <span className="font-semibold text-[var(--ok)]">
+                        {scores.faithfulness != null ? `${(scores.faithfulness * 100).toFixed(0)}%` : "—"}
+                      </span>
+                    </div>
+                    <div className="w-full h-1 bg-[var(--line)] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--ok)] rounded-full"
+                        style={{ width: `${scores.faithfulness != null ? scores.faithfulness * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Relevancy */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-[var(--ink-2)]">Relevancy</span>
+                      <span className="font-semibold text-[var(--ink)]">
+                        {scores.relevancy != null ? `${(scores.relevancy * 100).toFixed(0)}%` : "—"}
+                      </span>
+                    </div>
+                    <div className="w-full h-1 bg-[var(--line)] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--accent)] rounded-full"
+                        style={{ width: `${scores.relevancy != null ? scores.relevancy * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Authority */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-[var(--ink-2)]">Source authority estimate</span>
+                      <span className="font-semibold text-[var(--ink)]">
+                        {scores.authority != null ? `${(scores.authority * 100).toFixed(0)}%` : "—"}
+                      </span>
+                    </div>
+                    <div className="w-full h-1 bg-[var(--line)] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--ink-2)] rounded-full"
+                        style={{ width: `${scores.authority != null ? scores.authority * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+
+                  {/* Coverage */}
+                  <div className="space-y-1">
+                    <div className="flex justify-between text-[11px]">
+                      <span className="text-[var(--ink-2)]">Coverage</span>
+                      <span className="font-semibold text-[var(--ink)]">
+                        {scores.coverage != null ? `${(scores.coverage * 100).toFixed(0)}%` : "—"}
+                      </span>
+                    </div>
+                    <div className="w-full h-1 bg-[var(--line)] rounded-full overflow-hidden">
+                      <div
+                        className="h-full bg-[var(--accent)] rounded-full"
+                        style={{ width: `${scores.coverage != null ? scores.coverage * 100 : 0}%` }}
+                      />
+                    </div>
+                  </div>
+                </div>
+
+                <div className="flex justify-between text-[11px] font-mono pt-2 border-t border-[var(--line)]">
+                  <span className="text-[var(--ink-2)]">Citation IDs resolved</span>
+                  <span className="font-semibold text-[var(--ink)]">{citationValidity != null ? `${(citationValidity * 100).toFixed(0)}%` : "Not measured"}</span>
+                </div>
+
+                <p className="text-xs font-sans text-[var(--ink-2)] pt-1 border-t border-[var(--line)] leading-relaxed">
+                  Claim support is judged against cited excerpts. Unavailable judgments are shown as unmeasured; citation-ID validity is reported separately.
+                </p>
+              </>
+            ) : (
+              <div className="space-y-2 py-1">
+                <p className="text-xs font-sans text-[var(--ink-3)] leading-relaxed">
+                  Verification telemetry was not recorded for this legacy dossier.
+                </p>
+              </div>
+            )}
+
+            <button
+              type="button"
+              onClick={() => setRunInspectorOpen(true)}
+              className="btn-secondary w-full text-xs"
+            >
+              <span>Open details</span>
+              <ChevronRight className="w-3.5 h-3.5" />
+            </button>
+          </div>
+
+          {/* Pruned Claims Section */}
+          <div className="p-3.5 rounded-[8px] bg-[var(--surface-2)]/30 border border-[var(--line)] space-y-2 text-xs">
+            <span className="text-[10px] font-mono uppercase text-[var(--ink-3)] font-semibold block">
+              Unmatched Citation IDs
+            </span>
+            <p className="text-[11px] text-[var(--ink-3)] leading-relaxed">
+              {report.guard_results?.hallucinated_sources_count ?? "—"} citation IDs did not match the retrieved evidence manifest. Claim judgments and reasons are listed in run details.
+            </p>
+          </div>
+        </aside>
+      </div>
+
+      {/* ─── Screen 7.8 Evidence Inspector Drawer (Right, 380px) ───────── */}
+      {inspectorOpen && selectedCitation && (
+        <div className="fixed inset-0 z-50 flex items-center justify-end bg-black/40">
+          <div className="w-full max-w-[380px] h-full bg-[var(--surface)] border-l border-[var(--line)] p-6 flex flex-col justify-between shadow-2xl animate-in slide-in-from-right duration-200">
+            <div className="space-y-4">
+              <div className="flex items-center justify-between pb-3 border-b border-[var(--line)]">
+                <div className="flex items-center gap-2">
+                  <span className="text-[10px] font-mono uppercase font-bold px-1.5 py-0.5 rounded bg-[var(--surface-2)] text-[var(--accent)]">
+                    {selectedCitation.kind === "doc" ? "VAULT" : "RESEARCH"}
+                  </span>
+                  <span className="text-xs font-mono font-semibold text-[var(--ink)]">
+                    Citation [{selectedCitation.id}]
+                  </span>
+                </div>
+                <button
+                  type="button"
+                  onClick={() => setInspectorOpen(false)}
+                  className="p-1 text-[var(--ink-3)] hover:text-[var(--ink)]"
+                >
+                  <X className="w-4 h-4" />
+                </button>
+              </div>
+
+              <h3 className="font-serif text-[16px] text-[var(--ink)] leading-snug">
+                {selectedCitation.title}
+              </h3>
+
+              <div className="text-xs font-mono text-[var(--ink-3)] space-y-1">
+                <div>Domain: {selectedCitation.domain}</div>
+                <div>Authority estimate: {selectedCitation.authority != null ? `${selectedCitation.authority.toFixed(1)} / 5` : selectedCitation.kind === "doc" ? "User-provided; not scored" : "Not scored"}</div>
+              </div>
+
+              {/* Status Verdict */}
+              <div className="p-2.5 rounded-[4px] bg-[var(--ok-soft)] border border-[var(--ok)]/40 text-xs flex items-center gap-2">
+                <Check className="w-3.5 h-3.5 text-[var(--ok)] shrink-0" />
+                <span className="text-[var(--ok)] font-medium">
+                  {selectedCitation.verdict === "unresolved" ? "Citation reference not found" : "Citation reference located"}
+                </span>
+              </div>
+
+              {/* Verbatim Excerpt */}
+              {selectedCitation.snippet && (
+                <div className="space-y-1.5 pt-2">
+                  <span className="text-[10px] font-mono uppercase text-[var(--ink-3)] block font-semibold">
+                    Source excerpt
+                  </span>
+                  <p className="font-serif text-xs text-[var(--ink)] bg-[var(--surface-2)] p-3 rounded-[6px] border border-[var(--line)] italic leading-relaxed">
+                    &ldquo;{selectedCitation.snippet}&rdquo;
+                  </p>
+                </div>
+              )}
+            </div>
+
+            <div className="pt-4 border-t border-[var(--line)] flex items-center justify-between">
+              {selectedCitation.url && (
+                <a
+                  href={selectedCitation.url}
+                  target="_blank"
+                  rel="noreferrer"
+                  className="btn-secondary text-xs flex items-center gap-1.5"
+                >
+                  <span>Open source</span>
+                  <ExternalLink className="w-3.5 h-3.5" />
+                </a>
+              )}
+              <button
+                type="button"
+                onClick={() => setInspectorOpen(false)}
+                className="btn-primary text-xs"
+              >
+                Done
+              </button>
+            </div>
+          </div>
+        </div>
+      )}
+
+      {/* ─── Screen 7.8 Run Inspector Drawer ─────────────────────────── */}
+      <RunInspectorDrawer
+        isOpen={runInspectorOpen}
+        onClose={() => setRunInspectorOpen(false)}
+        runId={reportId}
+        token={token}
+        sources={report.sources || report.evidence_manifest || []}
+        findings={report.findings || []}
+        scores={scores}
+      />
     </div>
   );
 }

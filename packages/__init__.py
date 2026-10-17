@@ -1,0 +1,3 @@
+"""
+Ada Platform Packages Monorepo
+"""

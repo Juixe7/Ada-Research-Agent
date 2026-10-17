@@ -1,88 +1,176 @@
 import time
 import json
-from typing import Optional
-from groq import Groq
-import google.generativeai as genai
+import threading
+from typing import Optional, Dict, Any, List, Type
+from pydantic import BaseModel
+
 from engine.config import (
-    GROQ_API_KEY, 
-    GROQ_PLANNER_MODEL, 
-    GEMINI_API_KEY, 
-    GEMINI_SYNTHESIS_MODEL
+    GROQ_API_KEY,
+    GEMINI_API_KEY,
+    REDIS_URL,
+    LLM_GROUPS,
+    LLM_DEFAULT_RPM,
+    LLM_DEFAULT_TPM,
+    RUN_COST_BUDGET_USD,
+    RUN_TOKEN_BUDGET,
+)
+from packages.llm_gateway import (
+    LLMClient,
+    LLMResult,
+    ModelGroup,
+    TokenBucketLimiter,
+    ResponseCache
 )
 
+def _get_redis_safe():
+    try:
+        import redis
+        client = redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=1.0, socket_timeout=1.0)
+        client.ping()
+        return client
+    except Exception:
+        return None
+
+# Shared Gateway Singleton
+_gateway_instance: Optional[LLMClient] = None
+_gateway_lock = threading.Lock()
 LAST_LLM_ERROR: Optional[str] = None
+
+
+def get_default_gateway() -> LLMClient:
+    """Returns thread-safe singleton of the LiteLLM Gateway."""
+    global _gateway_instance
+    if _gateway_instance is None:
+        with _gateway_lock:
+            if _gateway_instance is None:
+                redis_c = _get_redis_safe()
+                limiter = TokenBucketLimiter(
+                    redis_client=redis_c,
+                    default_rpm=LLM_DEFAULT_RPM,
+                    default_tpm=LLM_DEFAULT_TPM
+                )
+                cache = ResponseCache(redis_client=redis_c, default_ttl=86400)
+                _gateway_instance = LLMClient(
+                    model_groups=LLM_GROUPS,
+                    limiter=limiter,
+                    cache=cache
+                )
+    return _gateway_instance
+
 
 def get_last_llm_error() -> Optional[str]:
     """Returns the most recent LLM provider error message for actionable diagnosis."""
     global LAST_LLM_ERROR
     return LAST_LLM_ERROR
 
+
+def call_gateway(
+    group: ModelGroup,
+    messages: List[Dict[str, str]],
+    schema: Optional[Type[BaseModel]] = None,
+    temperature: float = 0.15,
+    max_tokens: int = 1500,
+    json_mode: bool = False,
+    timeout: float = 40.0,
+    run_id: Optional[str] = None,
+    agent_name: Optional[str] = None
+) -> LLMResult:
+    """Invokes the LiteLLM Gateway and returns the complete LLMResult with telemetry."""
+    global LAST_LLM_ERROR
+    gateway = get_default_gateway()
+    result = None
+    if run_id:
+        try:
+            from engine.storage.relational_store import RelationalStore
+            usage = RelationalStore.get_run_usage(run_id)
+            if usage["tokens_in"] + usage["tokens_out"] >= RUN_TOKEN_BUDGET:
+                result = LLMResult(content="", group=group, degraded=True, error=f"Run token budget of {RUN_TOKEN_BUDGET:,} tokens reached.")
+            elif RelationalStore.get_run_cost(run_id) >= RUN_COST_BUDGET_USD:
+                result = LLMResult(content="", group=group, degraded=True, error=f"Run cost budget of ${RUN_COST_BUDGET_USD:.2f} reached.")
+        except Exception as budget_error:
+            print(f"[llm] Budget check notice: {budget_error}")
+    if result is None:
+        result = gateway.complete(
+            group=group,
+            messages=messages,
+            schema=schema,
+            temperature=temperature,
+            max_tokens=max_tokens,
+            json_mode=json_mode,
+            timeout=timeout,
+            run_id=run_id,
+            agent_name=agent_name
+        )
+    LAST_LLM_ERROR = result.error
+    if run_id:
+        try:
+            from engine.storage.relational_store import RelationalStore
+            from packages.llm_gateway.tracing import trace_id_for_run
+
+            RelationalStore.record_llm_call(
+                run_id=run_id,
+                agent=agent_name or group,
+                model=result.model or group,
+                tokens_in=result.usage.input_tokens,
+                tokens_out=result.usage.output_tokens,
+                latency_ms=result.latency_ms,
+                cost=result.cost_estimate,
+                cache_hit=result.cache_hit,
+                trace_id=trace_id_for_run(str(run_id)),
+            )
+            from engine.events import publish_event
+            if result.degraded or result.error:
+                publish_event(run_id, "provider_degraded", {
+                    "agent": agent_name or group,
+                    "model": result.model,
+                    "fallback_used": bool(result.degraded and result.content),
+                    "message": result.error or "Fallback model was used.",
+                })
+            publish_event(run_id, "llm_call_completed", {
+                "agent": agent_name or group,
+                "model": result.model,
+                "tokens_in": result.usage.input_tokens,
+                "tokens_out": result.usage.output_tokens,
+                "latency_ms": result.latency_ms,
+                "cost": result.cost_estimate,
+                "cache_hit": result.cache_hit,
+                "degraded": result.degraded,
+                "error": result.error,
+            })
+        except Exception as telemetry_error:
+            print(f"[llm] Telemetry persistence notice: {telemetry_error}")
+    return result
+
+
 def call_resilient_llm(
     system_prompt: str,
     user_prompt: str,
     temperature: float = 0.15,
     max_tokens: int = 1500,
-    json_mode: bool = True
+    json_mode: bool = True,
+    group: ModelGroup = "small",
+    schema: Optional[Type[BaseModel]] = None,
+    run_id: Optional[str] = None,
+    agent_name: Optional[str] = None,
 ) -> Optional[str]:
     """
-    Bulletproof multi-tier LLM routing with automatic exponential backoff on 429
-    and seamless provider fallback (Groq -> Gemini).
+    Backward-compatible facade over the LiteLLM Gateway.
+    Automatically handles rate-limiting, failovers (Groq -> Gemini), and caching.
     """
-    global LAST_LLM_ERROR
-    LAST_LLM_ERROR = None
-
-    # ── Tier 1: Groq with Exponential Backoff on 429 ──
-    if GROQ_API_KEY:
-        client = Groq(api_key=GROQ_API_KEY)
-        for attempt in range(2):
-            try:
-                kwargs = {
-                    "model": GROQ_PLANNER_MODEL,
-                    "messages": [
-                        {"role": "system", "content": system_prompt},
-                        {"role": "user", "content": user_prompt}
-                    ],
-                    "temperature": temperature,
-                    "max_tokens": max_tokens
-                }
-                if json_mode:
-                    kwargs["response_format"] = {"type": "json_object"}
-
-                resp = client.chat.completions.create(**kwargs)
-                if resp.choices and resp.choices[0].message.content:
-                    return resp.choices[0].message.content.strip()
-            except Exception as e:
-                err_msg = str(e)
-                LAST_LLM_ERROR = f"Groq error: {err_msg}"
-                print(f"[llm_resilient] Groq attempt {attempt+1} notice: {err_msg[:120]}")
-                if ("429" in err_msg or "rate" in err_msg.lower() or "quota" in err_msg.lower()) and attempt == 0:
-                    time.sleep(2)
-                    continue
-                break
-
-    # ── Tier 2: Gemini Fallback (Independent Quota) ──
-    if GEMINI_API_KEY:
-        try:
-            print(f"[llm_resilient] Engaging Tier-2 Gemini fallback ({GEMINI_SYNTHESIS_MODEL})...")
-            genai.configure(api_key=GEMINI_API_KEY)
-            model = genai.GenerativeModel(
-                model_name=GEMINI_SYNTHESIS_MODEL,
-                system_instruction=system_prompt
-            )
-            gen_config = genai.types.GenerationConfig(
-                temperature=temperature,
-                max_output_tokens=max_tokens,
-                response_mime_type="application/json" if json_mode else "text/plain"
-            )
-            resp = model.generate_content(
-                user_prompt,
-                generation_config=gen_config,
-                request_options={"timeout": 20}
-            )
-            if resp and resp.text:
-                return resp.text.strip()
-        except Exception as gemini_err:
-            LAST_LLM_ERROR = f"Gemini fallback error: {gemini_err}"
-            print(f"[llm_resilient] Gemini fallback error: {gemini_err}")
-
+    messages = [
+        {"role": "system", "content": system_prompt},
+        {"role": "user", "content": user_prompt}
+    ]
+    res = call_gateway(
+        group=group,
+        messages=messages,
+        schema=schema,
+        temperature=temperature,
+        max_tokens=max_tokens,
+        json_mode=json_mode,
+        run_id=run_id,
+        agent_name=agent_name,
+    )
+    if res.content:
+        return res.content.strip()
     return None

@@ -1,7 +1,7 @@
 services:
   redis:
     image: redis:7-alpine
-    command: redis-server --maxmemory 64mb --maxmemory-policy allkeys-lru
+    command: redis-server --appendonly yes --maxmemory-policy noeviction
     restart: unless-stopped
     volumes:
       - redis_data:/data
@@ -26,11 +26,16 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
       - USE_CELERY=true
+      - APP_ENV=production
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/ada.db}
-      - JWT_SECRET=${JWT_SECRET:-ada-secret-key-prod-2026}
+      - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET to a long, random value}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - SERPER_API_KEY=${SERPER_API_KEY}
+      - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-false}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_OTEL_HOST=${LANGFUSE_OTEL_HOST:-http://host.docker.internal:3000}
     volumes:
       - sqlite_data:/app/data
       - uploads_data:/app/uploads
@@ -38,6 +43,8 @@ services:
     depends_on:
       - redis
       - qdrant
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - ada_network
 
@@ -51,11 +58,16 @@ services:
       - REDIS_URL=redis://redis:6379/0
       - QDRANT_URL=http://qdrant:6333
       - USE_CELERY=true
+      - APP_ENV=production
       - DATABASE_URL=${DATABASE_URL:-sqlite:////app/data/ada.db}
-      - JWT_SECRET=${JWT_SECRET:-ada-secret-key-prod-2026}
+      - JWT_SECRET=${JWT_SECRET:?Set JWT_SECRET to a long, random value}
       - GROQ_API_KEY=${GROQ_API_KEY}
       - GEMINI_API_KEY=${GEMINI_API_KEY}
       - SERPER_API_KEY=${SERPER_API_KEY}
+      - LANGFUSE_ENABLED=${LANGFUSE_ENABLED:-false}
+      - LANGFUSE_PUBLIC_KEY=${LANGFUSE_PUBLIC_KEY:-}
+      - LANGFUSE_SECRET_KEY=${LANGFUSE_SECRET_KEY:-}
+      - LANGFUSE_OTEL_HOST=${LANGFUSE_OTEL_HOST:-http://host.docker.internal:3000}
     volumes:
       - sqlite_data:/app/data
       - uploads_data:/app/uploads
@@ -63,6 +75,8 @@ services:
     depends_on:
       - redis
       - qdrant
+    extra_hosts:
+      - "host.docker.internal:host-gateway"
     networks:
       - ada_network
 

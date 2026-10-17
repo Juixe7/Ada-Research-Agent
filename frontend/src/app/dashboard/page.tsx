@@ -2,19 +2,17 @@
 
 import { useState, useEffect, useMemo } from "react";
 import { useRouter } from "next/navigation";
-import { 
-  Search, ArrowRight, FolderArchive, Clock, 
-  Layers, FileText, Plus, ChevronRight, HardDrive,
-  BookOpen, Sparkles, Database
-} from "lucide-react";
+import Link from "next/link";
+import { Search, FolderArchive, Layers, ChevronRight, Database } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { useAuth } from "@/context/AuthContext";
-import { API_URL } from "@/lib/config";
+import { API_URL, formatDossierDate } from "@/lib/config";
 
 interface SessionItem {
   id: string;
   title: string;
   latest_query?: string;
+  latest_status?: string;
   turn_count: number;
   updated_at: string;
 }
@@ -33,6 +31,7 @@ export default function UserDashboardPage() {
   const [sessions, setSessions] = useState<SessionItem[]>([]);
   const [vaultDocs, setVaultDocs] = useState<VaultItem[]>([]);
   const [dataLoading, setDataLoading] = useState(true);
+  const [dataError, setDataError] = useState(false);
 
   // Guard: redirect to login if unauthenticated
   useEffect(() => {
@@ -48,14 +47,23 @@ export default function UserDashboardPage() {
     const headers = { Authorization: `Bearer ${token}` };
 
     Promise.all([
-      fetch(`${API_URL}/api/sessions`, { headers }).then(r => r.ok ? r.json() : { sessions: [] }),
-      fetch(`${API_URL}/api/vault`, { headers }).then(r => r.ok ? r.json() : { documents: [] })
+      fetch(`${API_URL}/api/sessions`, { headers }).then(r => {
+        if (!r.ok) throw new Error("Could not load research conversations");
+        return r.json();
+      }),
+      fetch(`${API_URL}/api/vault`, { headers }).then(r => {
+        if (!r.ok) throw new Error("Could not load the source library");
+        return r.json();
+      })
     ])
       .then(([sessData, vaultData]) => {
         setSessions(sessData.sessions || []);
         setVaultDocs(vaultData.documents || []);
       })
-      .catch((err) => console.warn("Dashboard fetch warning:", err))
+      .catch((err) => {
+        console.warn("Dashboard fetch warning:", err);
+        setDataError(true);
+      })
       .finally(() => setDataLoading(false));
   }, [token]);
 
@@ -68,7 +76,6 @@ export default function UserDashboardPage() {
     router.push(`/studio?q=${encodeURIComponent(launcherQuery.trim())}`);
   };
 
-  // Time-aware greeting
   const getGreeting = () => {
     const hour = new Date().getHours();
     if (hour < 12) return "Good morning";
@@ -76,224 +83,177 @@ export default function UserDashboardPage() {
     return "Good evening";
   };
 
-  // Derived metrics
+  const formatResearchStatus = (status?: string) => {
+    if (status === "completed") return "Completed";
+    if (status === "failed") return "Needs attention";
+    if (status === "cancelled") return "Cancelled";
+    if (status === "empty") return "No research yet";
+    return "In progress";
+  };
+
   const totalPassages = useMemo(() => {
     return vaultDocs.reduce((acc, d) => acc + (d.chunk_count || 0), 0);
   }, [vaultDocs]);
 
   const totalTurns = useMemo(() => {
-    return sessions.reduce((acc, s) => acc + (s.turn_count || 1), 0);
+    return sessions.reduce((acc, s) => acc + (s.turn_count || 0), 0);
   }, [sessions]);
 
   if (authLoading || !user) {
     return (
-      <div className="min-h-screen bg-[#0c0d12] flex items-center justify-center">
-        <div className="w-5 h-5 border-2 border-zinc-700 border-t-zinc-300 rounded-full animate-spin" />
+      <div className="min-h-screen bg-[var(--paper)] flex items-center justify-center font-mono text-xs text-[var(--ink-3)]">
+        <span className="w-2.5 h-2.5 rounded-full bg-[var(--accent)] animate-quiet-pulse" />
       </div>
     );
   }
 
   return (
-    <div className="min-h-screen bg-[#0c0d12] text-zinc-100 flex flex-col font-sans selection:bg-zinc-800 selection:text-zinc-100">
+    <div className="min-h-screen bg-[var(--paper)] text-[var(--ink)] flex flex-col font-sans selection:bg-[var(--accent-soft)]">
       <Navbar />
 
-      <main className="flex-1 max-w-6xl w-full mx-auto px-4 sm:px-6 py-8 md:py-12 space-y-10">
+      <main className="flex-1 max-w-5xl w-full mx-auto px-6 py-10 md:py-14 space-y-10">
         {/* Welcome Banner & Quick Launcher */}
-        <div className="space-y-6">
-          <div className="space-y-1.5">
-            <span className="text-[11px] font-mono text-zinc-400 uppercase tracking-wider block">
-              RESEARCH WORKSPACE
+        <div className="space-y-4">
+          <div className="space-y-1">
+            <span className="text-[11px] font-mono text-[var(--ink-3)] uppercase tracking-wider block">
+              YOUR WORKSPACE
             </span>
-            <h1 className="text-3xl sm:text-4xl font-serif font-bold text-zinc-100 tracking-tight">
-              {getGreeting()}, <span className="text-zinc-300">{user.username}</span>.
+            <h1 className="text-3xl sm:text-4xl font-serif font-bold text-[var(--ink)] tracking-tight">
+              {getGreeting()}, <span className="text-[var(--accent)]">{user.username}</span>.
             </h1>
-            <p className="text-xs sm:text-sm text-zinc-400 max-w-xl leading-relaxed">
-              Launch an autonomous multi-agent investigation, or resume past research dossiers from your workspace.
+            <p className="text-xs sm:text-sm text-[var(--ink-2)] max-w-xl leading-relaxed">
+              Formulate a research inquiry or resume active investigations from your private workspace.
             </p>
           </div>
 
           {/* Quick Launcher Input Bar */}
-          <form onSubmit={handleLaunchSearch} className="relative group max-w-3xl">
-            <div className="relative flex items-center bg-[#12131a] border border-zinc-800/80 focus-within:border-zinc-600 focus-within:ring-1 focus-within:ring-zinc-600/30 rounded-2xl shadow-xl transition-all">
-              <Search className="w-4 h-4 text-zinc-500 ml-4 shrink-0" />
+          <form onSubmit={handleLaunchSearch} className="space-y-2.5 max-w-2xl">
+            <div className="relative flex items-center bg-[var(--surface)] border border-[var(--line-strong)] focus-within:border-[var(--accent)] focus-within:ring-1 focus-within:ring-[var(--accent)]/30 rounded-xl shadow-xs transition-all">
+              <Search className="w-4 h-4 text-[var(--ink-3)] ml-4 shrink-0" />
               <input
                 type="text"
                 value={launcherQuery}
                 onChange={(e) => setLauncherQuery(e.target.value)}
-                placeholder="Formulate a new research inquiry (e.g. Solid-state battery commercial yield benchmarks by 2026)..."
-                className="w-full bg-transparent px-3 py-3.5 text-xs sm:text-sm text-zinc-100 placeholder-zinc-500 focus:outline-none font-sans"
+                placeholder="What are you trying to understand?"
+                className="w-full bg-transparent px-3.5 py-3.5 text-xs sm:text-sm text-[var(--ink)] placeholder:text-[var(--ink-3)] focus:outline-none font-sans"
               />
               <button
                 type="submit"
-                className="mr-2 px-4 py-2 rounded-xl bg-zinc-200 hover:bg-white text-zinc-950 font-medium text-xs flex items-center gap-1.5 transition-all cursor-pointer shrink-0"
+                className="mr-2.5 btn-primary text-xs py-2 px-4 shadow-xs flex items-center gap-1.5"
               >
-                <span>Launch Studio</span>
-                <ArrowRight className="w-3.5 h-3.5" />
+                <span>Launch</span>
+                <span className="text-[10px] opacity-60 font-mono hidden sm:inline">↵</span>
               </button>
             </div>
+
+            <p className="text-xs text-[var(--ink-3)]">
+              Ask a focused question, compare ideas, or check a claim against your sources.
+            </p>
           </form>
         </div>
 
-        {/* 3 Metric Cards */}
+        {/* Workspace overview */}
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-          <div className="bg-[#12131a] border border-zinc-800/80 rounded-2xl p-5 space-y-1.5">
-            <div className="flex items-center justify-between text-zinc-400">
-              <span className="text-[11px] font-mono uppercase tracking-wider">Research Dossiers</span>
-              <Layers className="w-4 h-4 text-zinc-400" />
+          <div className="bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--line-strong)] rounded-xl p-5 space-y-2 transition-colors shadow-xs">
+            <div className="flex items-center justify-between text-[var(--ink-3)]">
+              <span className="text-xs font-medium">Research conversations</span>
+              <Layers className="w-4 h-4 text-[var(--accent)]" />
             </div>
-            <div className="text-2xl font-serif font-bold text-zinc-100">
-              {sessions.length}
+            <div className="text-3xl font-serif font-bold text-[var(--ink)] tracking-tight">
+              {dataLoading || dataError ? "—" : sessions.length}
             </div>
-            <p className="text-[11px] text-zinc-400">
-              {totalTurns} total investigation turns
+            <p className="text-xs text-[var(--ink-3)] leading-relaxed">
+              Pick up a previous line of inquiry.
             </p>
           </div>
 
-          <div className="bg-[#12131a] border border-zinc-800/80 rounded-2xl p-5 space-y-1.5">
-            <div className="flex items-center justify-between text-zinc-400">
-              <span className="text-[11px] font-mono uppercase tracking-wider">Private Vault</span>
-              <FolderArchive className="w-4 h-4 text-zinc-400" />
+          <div className="bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--line-strong)] rounded-xl p-5 space-y-2 transition-colors shadow-xs">
+            <div className="flex items-center justify-between text-[var(--ink-3)]">
+              <span className="text-xs font-medium">Source library</span>
+              <FolderArchive className="w-4 h-4 text-[var(--accent)]" />
             </div>
-            <div className="text-2xl font-serif font-bold text-zinc-100">
-              {vaultDocs.length}
+            <div className="text-3xl font-serif font-bold text-[var(--ink)] tracking-tight">
+              {dataLoading || dataError ? "—" : vaultDocs.length}
             </div>
-            <p className="text-[11px] text-zinc-400">Proprietary documents & notes</p>
+            <p className="text-xs text-[var(--ink-3)] leading-relaxed">
+              Documents you can bring into new research.
+            </p>
           </div>
 
-          <div className="bg-[#12131a] border border-zinc-800/80 rounded-2xl p-5 space-y-1.5">
-            <div className="flex items-center justify-between text-zinc-400">
-              <span className="text-[11px] font-mono uppercase tracking-wider">Indexed Passages</span>
-              <Database className="w-4 h-4 text-zinc-400" />
+          <div className="bg-[var(--surface)] border border-[var(--line)] hover:border-[var(--line-strong)] rounded-xl p-5 space-y-2 transition-colors shadow-xs">
+            <div className="flex items-center justify-between text-[var(--ink-3)]">
+              <span className="text-xs font-medium">Searchable passages</span>
+              <Database className="w-4 h-4 text-[var(--accent)]" />
             </div>
-            <div className="text-2xl font-serif font-bold text-zinc-100">
-              {totalPassages > 0 ? totalPassages.toLocaleString() : "Active"}
+            <div className="text-3xl font-serif font-bold text-[var(--ink)] tracking-tight">
+              {dataLoading || dataError ? "—" : totalPassages.toLocaleString()}
             </div>
-            <p className="text-[11px] text-zinc-400">Vectorized private evidence units</p>
+            <p className="text-xs text-[var(--ink-3)] leading-relaxed">
+              Excerpts indexed from your source documents.
+            </p>
           </div>
         </div>
 
-        {/* Two-Column Section: Recent Sessions + Vault Widget */}
-        <div className="grid grid-cols-1 lg:grid-cols-3 gap-8">
-          {/* Recent Research Sessions (2 cols) */}
-          <div className="lg:col-span-2 space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold uppercase tracking-wider font-mono text-zinc-400 flex items-center gap-2">
-                <Clock className="w-3.5 h-3.5 text-zinc-400" />
-                <span>Recent Research Sessions</span>
-              </h2>
-              <a href="/studio" className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors flex items-center gap-1">
-                <span>Open Studio Workbench</span>
-                <ChevronRight className="w-3.5 h-3.5" />
-              </a>
-            </div>
+        {/* Active Research Sessions Table */}
+        <div className="space-y-3">
+          <div className="flex items-center justify-between pb-1 border-b border-[var(--line)]">
+            <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold">
+              Recent research
+            </span>
+            <Link
+              href="/history"
+              className="text-sm text-[var(--ink-2)] hover:text-[var(--accent)] transition-colors"
+            >
+              View history →
+            </Link>
+          </div>
 
-            {dataLoading ? (
-              <div className="bg-[#12131a] border border-zinc-800/80 rounded-2xl p-10 text-center text-xs text-zinc-500 font-mono">
-                Loading sessions...
-              </div>
-            ) : sessions.length === 0 ? (
-              <div className="bg-[#12131a] border border-zinc-800/80 rounded-2xl p-10 text-center space-y-3">
-                <Layers className="w-8 h-8 text-zinc-600 mx-auto" />
-                <p className="text-xs text-zinc-400">No research sessions yet.</p>
-                <a
-                  href="/studio"
-                  className="inline-flex items-center gap-1.5 px-3.5 py-2 bg-zinc-200 hover:bg-white text-zinc-950 rounded-xl text-xs font-medium transition-all"
+          {dataLoading ? (
+            <div className="py-8 text-center text-sm text-[var(--ink-3)]" role="status">
+              Loading your research…
+            </div>
+          ) : dataError ? (
+            <div role="alert" className="p-6 text-center bg-[var(--surface)] border border-[var(--line)] rounded-xl text-sm text-[var(--ink-2)]">
+              Your workspace data is temporarily unavailable. Refresh to try again.
+            </div>
+          ) : sessions.length === 0 ? (
+            <div className="p-8 text-center bg-[var(--surface)] border border-[var(--line)] rounded-xl space-y-2 text-sm text-[var(--ink-2)]">
+              <p>No research conversations yet. Start with a question you want to investigate.</p>
+              <Link href="/studio" className="btn-primary text-sm inline-flex mt-1">
+                Start research
+              </Link>
+            </div>
+          ) : (
+            <div className="divide-y divide-[var(--line)] border border-[var(--line)] rounded-xl bg-[var(--surface)] overflow-hidden shadow-xs">
+              {sessions.map((sess) => (
+                <Link
+                  key={sess.id}
+                  href={`/session/${sess.id}`}
+                  className="p-4 hover:bg-[var(--surface-2)] focus-visible:outline-offset-[-2px] transition-colors flex items-center justify-between text-sm group"
                 >
-                  <Plus className="w-3.5 h-3.5" />
-                  <span>Start First Investigation</span>
-                </a>
-              </div>
-            ) : (
-              <div className="space-y-2.5">
-                {sessions.slice(0, 5).map((s) => (
-                  <div
-                    key={s.id}
-                    className="bg-[#12131a] hover:bg-[#161822] border border-zinc-800/80 hover:border-zinc-700/80 rounded-xl p-4 transition-all flex items-center justify-between gap-4 group"
-                  >
-                    <div className="space-y-1 min-w-0 flex-1">
-                      <div className="flex items-center gap-2">
-                        <span className="text-[10px] font-mono px-2 py-0.5 rounded bg-zinc-800/80 text-zinc-300 border border-zinc-700/60 font-medium">
-                          {s.turn_count} {s.turn_count === 1 ? "turn" : "turns"}
-                        </span>
-                        <span className="text-[11px] text-zinc-500 font-mono">
-                          {new Date(s.updated_at).toLocaleDateString()}
-                        </span>
-                      </div>
-                      <h3 className="text-sm font-medium text-zinc-200 group-hover:text-zinc-100 transition-colors truncate">
-                        {s.title}
-                      </h3>
-                      {s.latest_query && (
-                        <p className="text-xs text-zinc-400 truncate">
-                          {s.latest_query}
-                        </p>
-                      )}
-                    </div>
-
-                    <a
-                      href={`/session/${s.id}`}
-                      className="px-3 py-1.5 bg-[#161822] hover:bg-zinc-800 text-zinc-300 hover:text-white rounded-lg text-xs font-medium transition-all flex items-center gap-1 shrink-0 border border-zinc-800"
-                    >
-                      <span>Open</span>
-                      <ArrowRight className="w-3 h-3 text-zinc-400" />
-                    </a>
-                  </div>
-                ))}
-              </div>
-            )}
-          </div>
-
-          {/* Knowledge Vault Storage Widget (1 col) */}
-          <div className="space-y-4">
-            <div className="flex items-center justify-between">
-              <h2 className="text-xs font-semibold uppercase tracking-wider font-mono text-zinc-400 flex items-center gap-2">
-                <FolderArchive className="w-3.5 h-3.5 text-zinc-400" />
-                <span>Knowledge Vault</span>
-              </h2>
-              <a href="/vault" className="text-xs text-zinc-400 hover:text-zinc-200 transition-colors">
-                Manage
-              </a>
-            </div>
-
-            <div className="bg-[#12131a] border border-zinc-800/80 rounded-2xl p-5 space-y-4">
-              <div className="space-y-1 text-xs">
-                <p className="text-zinc-200 font-medium">Private Document Memory</p>
-                <p className="text-[11px] text-zinc-400 leading-relaxed">
-                  Upload internal PDFs or notes. Ada cross-references them with live web intelligence during autonomous research.
-                </p>
-              </div>
-
-              {vaultDocs.length > 0 ? (
-                <div className="space-y-1.5 max-h-48 overflow-y-auto pr-1">
-                  {vaultDocs.slice(0, 5).map((d) => (
-                    <div
-                      key={d.doc_name}
-                      className="flex items-center justify-between p-2 rounded-lg bg-[#0c0d12] border border-zinc-800/80 text-xs"
-                    >
-                      <div className="flex items-center gap-2 min-w-0 flex-1">
-                        <FileText className="w-3.5 h-3.5 text-zinc-400 shrink-0" />
-                        <span className="truncate text-zinc-300">{d.doc_name}</span>
-                      </div>
-                      <span className="text-[10px] font-mono text-zinc-500 shrink-0 ml-2">
-                        {d.size_kb} KB
+                  <div className="space-y-1 min-w-0 pr-4">
+                    <span className="font-medium text-[var(--ink)] group-hover:text-[var(--accent)] transition-colors truncate block text-xs sm:text-sm">
+                      {sess.title || sess.latest_query}
+                    </span>
+                    <div className="flex items-center gap-2 text-xs text-[var(--ink-3)]">
+                      <span className="px-1.5 py-0.5 rounded bg-[var(--surface-2)] border border-[var(--line)] text-[var(--accent)]">
+                        {sess.turn_count === 1 ? "1 turn" : `${sess.turn_count} turns`}
                       </span>
+                      <span>•</span>
+                      <span>{formatResearchStatus(sess.latest_status)}</span>
                     </div>
-                  ))}
-                </div>
-              ) : (
-                <div className="p-4 rounded-xl border border-dashed border-zinc-800 text-center text-xs text-zinc-500">
-                  No private documents uploaded yet.
-                </div>
-              )}
+                  </div>
 
-              <a
-                href="/vault"
-                className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-xl bg-zinc-800 hover:bg-zinc-700 text-zinc-200 border border-zinc-700/60 text-xs font-medium transition-all"
-              >
-                <span>Manage Vault Documents</span>
-                <ChevronRight className="w-3.5 h-3.5 text-zinc-400" />
-              </a>
+                  <div className="flex items-center gap-3 text-xs font-mono text-[var(--ink-3)] shrink-0">
+                    <span className="hidden sm:inline">
+                      {sess.updated_at ? formatDossierDate(sess.updated_at) : ""}
+                    </span>
+                    <ChevronRight className="w-4 h-4 text-[var(--ink-4)] group-hover:text-[var(--accent)] group-hover:translate-x-0.5 transition-all" />
+                  </div>
+                </Link>
+              ))}
             </div>
-          </div>
+          )}
         </div>
       </main>
     </div>

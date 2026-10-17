@@ -1,317 +1,648 @@
 "use client";
 
-import { useState, useEffect } from "react";
+import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
-import { 
-  ArrowRight, Search, FileText, CheckCircle2, 
-  ExternalLink, Layers, ShieldCheck, ChevronRight
+import Link from "next/link";
+import {
+  AlertCircle, ArrowRight, Database, SlidersHorizontal
 } from "lucide-react";
-import { motion } from "framer-motion";
 import Navbar from "@/components/Navbar";
+import ClarificationModal, { ScopingBlueprint } from "@/components/ClarificationModal";
 import { useAuth } from "@/context/AuthContext";
+import { API_URL } from "@/lib/config";
 
-export default function PublicLandingPage() {
-  const { user, loading } = useAuth();
+interface RecentRunItem {
+  id: string;
+  report_id?: string;
+  query?: string;
+  title?: string;
+  executive_title?: string;
+  status: string;
+  depth?: string;
+  created_at: string;
+  faithfulness_score?: number;
+}
+
+export default function PublicLandingAndDeskPage() {
   const router = useRouter();
+  const { user, token, loading: authLoading } = useAuth();
 
-  // Interactive state for Card 3: citation preview toggle
-  const [citationOpen, setCitationOpen] = useState(true);
+  // Screen 7.1 Input & Settings State
+  const [query, setQuery] = useState("");
+  const [depth, setDepth] = useState<"quick" | "standard" | "deep">("standard");
+  const [useDocuments, setUseDocuments] = useState(true);
+  const [documentCount, setDocumentCount] = useState(0);
+  const [domainScope, setDomainScope] = useState<"all" | "academic" | "financial">("all");
+  const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
+  const [excludedDomains, setExcludedDomains] = useState("");
 
-  // If user is already authenticated, redirect to dashboard
+  // Scoping Clarification Modal State (Screen 7.2)
+  const [scopingModalOpen, setScopingModalOpen] = useState(false);
+  const [blueprint, setBlueprint] = useState<ScopingBlueprint | null>(null);
+  const [scopingLoading, setScopingLoading] = useState(false);
+  const [submitting, setSubmitting] = useState(false);
+  const [errorMsg, setErrorMsg] = useState("");
+
+  // Recent Runs List State
+  const [recentRuns, setRecentRuns] = useState<RecentRunItem[]>([]);
+  const [workspaceDataError, setWorkspaceDataError] = useState(false);
+  const [loadedSummaryToken, setLoadedSummaryToken] = useState<string | null>(null);
+  const loadingRuns = authLoading || Boolean(token && loadedSummaryToken !== token);
+
+  const textareaRef = useRef<HTMLTextAreaElement>(null);
+
+  // Auto-resize textarea
   useEffect(() => {
-    if (!loading && user) {
-      router.push("/dashboard");
+    if (textareaRef.current) {
+      textareaRef.current.style.height = "auto";
+      textareaRef.current.style.height = `${Math.max(68, textareaRef.current.scrollHeight)}px`;
     }
-  }, [user, loading, router]);
+  }, [query]);
+
+  // Fetch recent runs and vault document counts
+  useEffect(() => {
+    if (authLoading || !token) return;
+
+    const controller = new AbortController();
+    let active = true;
+    const headers: Record<string, string> = {};
+    headers["Authorization"] = `Bearer ${token}`;
+
+    Promise.all([
+      fetch(`${API_URL}/api/reports`, { headers, signal: controller.signal }).then(async (response) => {
+        if (!response.ok) throw new Error("Could not load recent research.");
+        return response.json();
+      }),
+      fetch(`${API_URL}/api/vault`, { headers, signal: controller.signal }).then(async (response) => {
+        if (!response.ok) throw new Error("Could not load the source library.");
+        return response.json();
+      }),
+    ]).then(([repData, vaultData]) => {
+      if (!active) return;
+      setRecentRuns((repData.reports || []).slice(0, 10).map((run: RecentRunItem) => ({
+        ...run,
+        title: run.title || run.executive_title,
+        id: run.id || run.report_id || "",
+      })).filter((run: RecentRunItem) => Boolean(run.id)));
+      setDocumentCount((vaultData.documents || []).length);
+      setWorkspaceDataError(false);
+    }).catch((error: unknown) => {
+      if (active && !(error instanceof DOMException && error.name === "AbortError")) {
+        console.warn("Workspace summary unavailable:", error);
+        setWorkspaceDataError(true);
+      }
+    }).finally(() => {
+      if (active) setLoadedSummaryToken(token);
+    });
+
+    return () => {
+      active = false;
+      controller.abort();
+    };
+  }, [token, authLoading]);
+
+  // Initiate research: first checks preflight scope
+  const handleInitiateResearch = async (skipPreflight = false) => {
+    const cleanedQuery = query.trim();
+    if (!cleanedQuery || submitting) return;
+    if (!token) {
+      const destination = `/studio?q=${encodeURIComponent(cleanedQuery)}`;
+      router.push(`/login?redirect=${encodeURIComponent(destination)}`);
+      return;
+    }
+    setErrorMsg("");
+
+    if (!skipPreflight) {
+      setScopingLoading(true);
+      try {
+        const headers: Record<string, string> = { "Content-Type": "application/json" };
+        if (token) headers["Authorization"] = `Bearer ${token}`;
+
+        const res = await fetch(`${API_URL}/api/research/preflight`, {
+          method: "POST",
+          headers,
+          body: JSON.stringify({
+            query: cleanedQuery,
+            include_user_docs: useDocuments,
+          }),
+        });
+
+        if (res.ok) {
+          const bp: ScopingBlueprint = await res.json();
+          setBlueprint(bp);
+          if (
+            bp.ambiguity_detected ||
+            (bp.clarification_options && bp.clarification_options.length > 0)
+          ) {
+            setScopingModalOpen(true);
+            setScopingLoading(false);
+            return;
+          }
+        }
+      } catch (err) {
+        console.warn("Preflight scoping check non-critical warning:", err);
+      } finally {
+        setScopingLoading(false);
+      }
+    }
+
+    await dispatchRun({});
+  };
+
+  const dispatchRun = async (params: {
+    clarificationChoice?: string | null;
+    customAngles?: string[];
+  }) => {
+    setSubmitting(true);
+    setErrorMsg("");
+    try {
+      const headers: Record<string, string> = { "Content-Type": "application/json" };
+      if (token) headers["Authorization"] = `Bearer ${token}`;
+
+      let researchQuery = query.trim();
+      if (domainScope === "academic" && !researchQuery.toLowerCase().includes("peer-reviewed")) {
+        researchQuery += " [Focus: peer-reviewed literature and academic research]";
+      } else if (domainScope === "financial" && !researchQuery.toLowerCase().includes("financial")) {
+        researchQuery += " [Focus: filings, market analysis, and economic data]";
+      }
+      const blockedDomains = excludedDomains.split(/[\s,;]+/).map((domain) => domain.trim().toLowerCase()).filter(Boolean);
+
+      const res = await fetch(`${API_URL}/api/research`, {
+        method: "POST",
+        headers,
+        body: JSON.stringify({
+          query: researchQuery,
+          depth,
+          include_user_docs: useDocuments,
+          blocked_domains: blockedDomains,
+          clarification_choice: params.clarificationChoice,
+          custom_angles: params.customAngles,
+        }),
+      });
+
+      if (!res.ok) {
+        const errData = await res.json().catch(() => ({}));
+        throw new Error(errData.detail || "Failed to initiate research run.");
+      }
+
+      const data = await res.json();
+      const runId = data.report_id || data.run_id;
+      if (runId) {
+        router.push(`/run/${runId}`);
+      }
+    } catch (err: unknown) {
+      setErrorMsg(err instanceof Error ? err.message : "An unexpected error occurred.");
+      setSubmitting(false);
+    }
+  };
+
+  const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
+    if (e.key === "Enter" && (e.ctrlKey || e.metaKey)) {
+      e.preventDefault();
+      handleInitiateResearch();
+    }
+  };
 
   return (
-    <div className="min-h-screen bg-[#0c0d12] text-[#fafaf9] flex flex-col font-sans relative overflow-x-hidden">
-      {/* Soft warm ambient background glow at the top */}
-      <div 
-        className="pointer-events-none absolute top-0 left-1/2 -translate-x-1/2 w-[1000px] h-[550px] bg-[radial-gradient(ellipse_60%_45%_at_50%_-10%,rgba(245,158,11,0.12),transparent_70%)] z-0" 
-      />
-
+    <div className="min-h-screen bg-[var(--paper)] text-[var(--ink)] flex flex-col font-sans selection:bg-[var(--accent-soft)] selection:text-[var(--ink)]">
       <Navbar />
 
-      {/* ─── Hero Section ─────────────────────────────────────────── */}
-      <section className="relative z-10 pt-24 pb-20 md:pt-32 md:pb-28 px-6 max-w-5xl mx-auto w-full text-center flex flex-col items-center">
-        {/* Eyebrow Badge */}
-        <motion.div 
-          initial={{ opacity: 0, y: 10 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.4 }}
-          className="inline-flex items-center gap-2 px-3.5 py-1.5 rounded-full bg-white/[0.05] border border-white/[0.1] text-zinc-300 text-xs font-mono tracking-wider uppercase mb-8"
-        >
-          <span className="w-1.5 h-1.5 rounded-full bg-zinc-400" />
-          <span>Autonomous Research Engine</span>
-        </motion.div>
+      {/* ─── Hero Section with Screen 7.1 Research Desk ──────────────── */}
+      <section className="w-full max-w-4xl mx-auto px-6 pt-16 pb-16 flex flex-col items-center text-center">
+        {/* Subtle Eyebrow Badge */}
+        <div className="inline-flex items-center gap-2 px-3 py-1 rounded-full bg-[var(--surface-2)] border border-[var(--line)] text-[var(--ink-2)] text-xs font-mono mb-6">
+          <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />
+          <span>Personal research workspace</span>
+        </div>
 
-        {/* Human Headline */}
-        <motion.h1 
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.1 }}
-          className="text-4xl sm:text-6xl md:text-7xl font-serif font-bold tracking-tight text-[#f4f4f5] leading-[1.08] max-w-4xl"
-        >
-          Research any topic in minutes, <br className="hidden sm:inline" />
-          <span className="italic font-normal text-zinc-300 font-serif">not hours.</span>
-        </motion.h1>
+        {/* Headline in Source Serif 4 */}
+        <h1 className="text-3xl sm:text-5xl md:text-6xl font-serif font-bold text-[var(--ink)] leading-[1.12] tracking-tight max-w-3xl">
+          Investigate complex questions <br className="hidden sm:inline" />
+          <span className="italic font-normal text-[var(--ink-2)]">with sources you can inspect.</span>
+        </h1>
 
-        {/* Straightforward, Honest Subheadline */}
-        <motion.p 
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.2 }}
-          className="mt-6 text-zinc-400 text-base sm:text-lg max-w-2xl leading-relaxed font-sans"
-        >
-          Ada searches the web, reads through your uploaded PDFs, and writes a comprehensive report with every fact linked directly to its source. No guesswork, no made-up facts.
-        </motion.p>
+        {/* Subtitle */}
+        <p className="mt-4 text-[var(--ink-2)] text-sm sm:text-base max-w-xl leading-relaxed">
+          Bring public search and selected library documents into one research flow. Review the retrieved sources and see where a report needs closer checking.
+        </p>
 
-        {/* Clear CTAs */}
-        <motion.div 
-          initial={{ opacity: 0, y: 14 }}
-          animate={{ opacity: 1, y: 0 }}
-          transition={{ duration: 0.5, delay: 0.3 }}
-          className="mt-10 flex flex-wrap items-center justify-center gap-3.5"
-        >
-          <a
-            href="/register"
-            className="bg-zinc-200 hover:bg-white text-zinc-950 font-semibold px-6 py-3 rounded-lg text-sm shadow-sm flex items-center gap-2 transition-all cursor-pointer"
-          >
-            <span>Start Free Research</span>
-            <ArrowRight className="w-4 h-4" />
-          </a>
-          <a
-            href="/login"
-            className="btn-secondary px-6 py-3 rounded-lg text-sm font-medium"
-          >
-            Sign In to Workspace
-          </a>
-        </motion.div>
+        {/* ─── Screen 7.1 Editorial Desk Column (720px wide) ──────────── */}
+        <div className="w-full max-w-[720px] mx-auto mt-10 text-left bg-[var(--surface)] border border-[var(--line-strong)] rounded-[10px] p-6 shadow-sm">
+          {/* Context Line */}
+          <div className="flex items-center justify-between text-xs font-mono text-[var(--ink-3)] mb-4 pb-2 border-b border-[var(--line)]">
+            <div className="flex items-center gap-2">
+              <span className="w-1.5 h-1.5 rounded-full bg-[var(--accent)]" />
+              {authLoading ? (
+                <span>Restoring workspace…</span>
+              ) : user ? (
+                <>
+                  <span>{`${user.username}'s workspace`}</span>
+                  <span>·</span>
+                  <span>{loadingRuns ? "Loading runs…" : workspaceDataError ? "Runs unavailable" : `${recentRuns.length} runs`}</span>
+                  <span>·</span>
+                  <span>{loadingRuns ? "Loading sources…" : workspaceDataError ? "Sources unavailable" : `${documentCount} documents`}</span>
+                </>
+              ) : (
+                <span>Sign in to access your private research workspace</span>
+              )}
+            </div>
+            <span className="text-[10px] uppercase tracking-wider text-[var(--ink-3)]">Desk</span>
+          </div>
+
+          {/* Question Textarea in Source Serif */}
+          <div className="relative border-b border-[var(--line)] focus-within:border-[var(--accent)] transition-colors pb-2">
+            <textarea
+              ref={textareaRef}
+              value={query}
+              onChange={(e) => setQuery(e.target.value)}
+              onKeyDown={handleKeyDown}
+              placeholder="Ask a question you want to investigate…"
+              rows={2}
+              className="w-full bg-transparent font-serif text-[17px] sm:text-[19px] leading-[1.4] text-[var(--ink)] placeholder:text-[var(--ink-3)]/60 focus:outline-none resize-none"
+            />
+          </div>
+
+          {errorMsg && (
+            <div className="mt-3 p-2.5 rounded-[4px] bg-[var(--bad-soft)] border border-[var(--bad)] text-xs text-[var(--bad)] flex items-center gap-2">
+              <AlertCircle className="w-4 h-4 shrink-0" />
+              <span>{errorMsg}</span>
+            </div>
+          )}
+
+          {/* Settings Bar */}
+          <div className="flex flex-wrap items-center justify-between gap-3 pt-4">
+            <div className="flex flex-wrap items-center gap-2 text-xs">
+              {/* Depth Selector Chips */}
+              <div className="inline-flex items-center rounded-[4px] border border-[var(--line)] bg-[var(--surface-2)] p-0.5">
+                <button
+                  type="button"
+                  onClick={() => setDepth("quick")}
+                  className={`px-2.5 py-1 rounded-[3px] text-xs transition-all ${
+                    depth === "quick"
+                      ? "bg-[var(--surface)] text-[var(--ink)] font-semibold shadow-xs"
+                      : "text-[var(--ink-3)] hover:text-[var(--ink-2)]"
+                  }`}
+                  title="A quick overview with one research pass"
+                >
+                  Quick <span className="text-[10px] opacity-60">1 pass</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDepth("standard")}
+                  className={`px-2.5 py-1 rounded-[3px] text-xs transition-all ${
+                    depth === "standard"
+                      ? "bg-[var(--surface)] text-[var(--ink)] font-semibold shadow-xs"
+                      : "text-[var(--ink-3)] hover:text-[var(--ink-2)]"
+                  }`}
+                  title="A balanced investigation with two research passes"
+                >
+                  Standard <span className="text-[10px] opacity-60">2 passes</span>
+                </button>
+                <button
+                  type="button"
+                  onClick={() => setDepth("deep")}
+                  className={`px-2.5 py-1 rounded-[3px] text-xs transition-all ${
+                    depth === "deep"
+                      ? "bg-[var(--surface)] text-[var(--ink)] font-semibold shadow-xs"
+                      : "text-[var(--ink-3)] hover:text-[var(--ink-2)]"
+                  }`}
+                  title="A broader investigation with three research passes"
+                >
+                  Deep <span className="text-[10px] opacity-60">3 passes</span>
+                </button>
+              </div>
+
+              {/* Use Documents Switch */}
+              <button
+                type="button"
+                onClick={() => setUseDocuments(!useDocuments)}
+                className={`chip ${useDocuments ? "chip-active" : ""}`}
+                title="Cross-reference private vault documents"
+              >
+                <Database className="w-3.5 h-3.5" />
+                <span>Vault ({documentCount})</span>
+              </button>
+
+              {/* Domain Scope Chip */}
+              <select
+                aria-label="Source focus"
+                value={domainScope}
+                onChange={(e) => setDomainScope(e.target.value as "all" | "academic" | "financial")}
+                className="chip bg-[var(--surface-2)] cursor-pointer text-xs pr-1"
+              >
+                <option value="all">All sources</option>
+                <option value="academic">Academic research focus</option>
+                <option value="financial">Markets and filings focus</option>
+              </select>
+
+              {/* Ghost More Options Toggle */}
+              <button
+                type="button"
+                onClick={() => setMoreOptionsOpen(!moreOptionsOpen)}
+                className="text-xs text-[var(--ink-3)] hover:text-[var(--ink)] p-1 rounded transition-colors"
+                title="Blocked domains & constraints"
+              >
+                <SlidersHorizontal className="w-3.5 h-3.5" />
+              </button>
+              <p className="basis-full text-[10px] text-[var(--ink-3)]">
+                Depth controls the number of research passes; completion time depends on available sources and provider response.
+              </p>
+            </div>
+
+            {/* Right: Primary Button */}
+            <div className="flex items-center gap-2 ml-auto">
+              <span className="hidden sm:inline text-[11px] font-mono text-[var(--ink-3)]">
+                Ctrl+Enter
+              </span>
+              <button
+                type="button"
+                onClick={() => handleInitiateResearch()}
+                disabled={!query.trim() || submitting || scopingLoading}
+                className="btn-primary"
+              >
+                {scopingLoading ? (
+                  <span>Scoping...</span>
+                ) : submitting ? (
+                  <span>Initiating...</span>
+                ) : (
+                  <>
+                    <span>Start research</span>
+                    <ArrowRight className="w-3.5 h-3.5" />
+                  </>
+                )}
+              </button>
+            </div>
+          </div>
+
+          {/* More Options Panel */}
+          {moreOptionsOpen && (
+            <div className="mt-3 p-3 bg-[var(--surface-2)] border border-[var(--line)] rounded-[6px] space-y-2 text-xs">
+              <label className="block text-[11px] font-mono text-[var(--ink-2)]">
+                Blocked Domains (comma separated)
+              </label>
+              <input
+                type="text"
+                value={excludedDomains}
+                onChange={(e) => setExcludedDomains(e.target.value)}
+                placeholder="e.g. reddit.com, pinterest.com"
+                className="input-base w-full px-2.5 py-1 text-xs"
+              />
+            </div>
+          )}
+
+          {/* Recent Runs List */}
+          {!user ? null : workspaceDataError ? (
+            <p role="status" className="mt-4 text-xs text-[var(--warn)]">
+              Workspace summary could not be loaded. Your research is still available in History.
+            </p>
+          ) : loadingRuns ? (
+            <p role="status" className="mt-4 text-xs text-[var(--ink-3)]">Loading your workspace…</p>
+          ) : recentRuns.length > 0 && (
+            <div className="mt-6 pt-4 border-t border-[var(--line)] space-y-2">
+              <div className="flex items-center justify-between pb-1">
+                <span className="text-xs font-medium text-[var(--ink-2)]">
+                  Recent research
+                </span>
+                <Link
+                  href="/history"
+                  className="text-sm text-[var(--ink-2)] hover:text-[var(--accent)] transition-colors"
+                >
+                  View history →
+                </Link>
+              </div>
+
+              <div className="divide-y divide-[var(--line)]">
+                {recentRuns.slice(0, 3).map((run) => (
+                  <Link
+                    key={run.id}
+                    href={run.status === "completed" ? `/report/${run.id}` : `/run/${run.id}`}
+                    className="py-2 px-1 flex items-baseline justify-between gap-3 hover:bg-[var(--surface-2)] focus-visible:outline-offset-[-2px] rounded-[4px] transition-colors group text-sm"
+                  >
+                    <div className="flex items-baseline gap-2 truncate">
+                      <span
+                        className={`w-1.5 h-1.5 rounded-full shrink-0 ${
+                          run.status === "completed" ? "bg-[var(--ok)]" : "bg-[var(--accent)] animate-quiet-pulse"
+                        }`}
+                      />
+                      <span className="text-[var(--ink)] group-hover:text-[var(--accent)] transition-colors truncate">
+                        {run.title || run.query}
+                      </span>
+                    </div>
+                    <span className="font-mono text-[10px] text-[var(--ink-3)] shrink-0">
+                      {run.faithfulness_score != null ? `${(run.faithfulness_score * 100).toFixed(0)}% refs` : ""}
+                    </span>
+                  </Link>
+                ))}
+              </div>
+
+            </div>
+          )}
+        </div>
       </section>
 
-      {/* ─── 3 Simple, Practical Feature Cards ────────────────────── */}
-      <section id="features" className="relative z-10 py-20 px-6 max-w-6xl mx-auto w-full space-y-16">
-        <div className="text-center space-y-3 max-w-2xl mx-auto">
-          <h2 className="text-2xl sm:text-4xl font-serif font-bold text-[#f4f4f5] tracking-tight">
-            How Ada does the heavy reading for you.
+      {!user && (
+      <>
+      {/* ─── Section 2: Features Section (#features) ──────────────────── */}
+      <section id="features" className="w-full max-w-5xl mx-auto px-6 py-20 border-t border-[var(--line)] scroll-mt-12 space-y-12">
+        <div className="text-center space-y-2 max-w-xl mx-auto">
+          <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold">
+            Architectural Foundations
+          </span>
+          <h2 className="text-2xl sm:text-3xl font-serif font-bold text-[var(--ink)] tracking-tight">
+            Research with evidence you can inspect.
           </h2>
-          <p className="text-sm text-zinc-400">
-            A practical tool built for researchers, developers, and analysts who need reliable answers fast.
+          <p className="text-xs sm:text-sm text-[var(--ink-2)] leading-relaxed">
+            Search public sources and your selected library documents, then inspect the evidence and source status available for each report.
           </p>
         </div>
 
         <div className="grid grid-cols-1 md:grid-cols-3 gap-6">
-          {/* Card 1: Ask or Upload */}
-          <motion.div 
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.4 }}
-            className="bg-[#12131a] border border-white/[0.08] rounded-xl p-6 flex flex-col justify-between space-y-6 hover:border-white/[0.18] transition-all"
-          >
-            <div className="space-y-3">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-semibold block">
-                01 / INPUT
+          {/* Card 1: Dual Retrieval */}
+          <div className="bg-[var(--surface)] border border-[var(--line)] rounded-[10px] p-6 space-y-4 flex flex-col justify-between hover:border-[var(--line-strong)] transition-colors">
+            <div className="space-y-2.5">
+              <span className="text-[11px] font-mono text-[var(--accent)] uppercase font-semibold">
+                01 / Dual Retrieval
               </span>
-              <h3 className="text-lg font-semibold text-[#f4f4f5]">
-                Start with a question or your own documents
+              <h3 className="text-base font-semibold text-[var(--ink)]">
+                Public sources meet your library
               </h3>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Type what you want to learn about, or drag and drop PDFs, articles, and research papers from your private vault.
+              <p className="text-xs text-[var(--ink-2)] leading-relaxed">
+                Search public sources and, when selected, passages indexed from your private library. Reports keep those evidence types identifiable.
               </p>
             </div>
 
-            {/* Clean UI Card Preview */}
-            <div className="bg-[#161822] border border-white/[0.08] rounded-lg p-4 font-sans text-xs space-y-3">
-              <div className="space-y-1">
-                <span className="text-[10px] font-mono uppercase text-zinc-400 block">Research Topic</span>
-                <p className="text-zinc-200 font-medium">
-                  &ldquo;Global solar panel recycling trends in 2025&rdquo;
-                </p>
+            <div className="p-3 bg-[var(--surface-2)] rounded-[6px] border border-[var(--line)] text-xs font-mono space-y-2">
+              <div className="flex items-center justify-between text-[11px]">
+                <span className="text-[var(--ink-2)]">Source Channels</span>
+                <span className="text-[var(--ink-2)] font-semibold">When available</span>
               </div>
-
-              <div className="pt-2 border-t border-white/[0.06] flex items-center justify-between">
-                <div className="inline-flex items-center gap-1.5 px-2.5 py-1 rounded bg-white/[0.05] border border-white/[0.08] text-[11px] text-zinc-300">
-                  <FileText className="w-3.5 h-3.5 text-zinc-400" />
-                  <span>Market_Overview_2025.pdf</span>
-                </div>
-                <span className="text-[10px] font-mono text-zinc-500">Private Vault</span>
+              <div className="text-[11px] text-[var(--ink-3)] space-y-1">
+                <div>• Public web results from configured search providers</div>
+                <div>• Indexed passages from selected library documents</div>
               </div>
             </div>
-          </motion.div>
+          </div>
 
-          {/* Card 2: Reads Multiple Sources at Once */}
-          <motion.div 
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.4, delay: 0.1 }}
-            className="bg-[#12131a] border border-white/[0.08] rounded-xl p-6 flex flex-col justify-between space-y-6 hover:border-white/[0.18] transition-all"
-          >
-            <div className="space-y-3">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-semibold block">
-                02 / INVESTIGATION
+          {/* Card 2: Adversarial Critic */}
+          <div className="bg-[var(--surface)] border border-[var(--line)] rounded-[10px] p-6 space-y-4 flex flex-col justify-between hover:border-[var(--line-strong)] transition-colors">
+            <div className="space-y-2.5">
+              <span className="text-[11px] font-mono text-[var(--warn)] uppercase font-semibold">
+                02 / Adversarial Audit
               </span>
-              <h3 className="text-lg font-semibold text-[#f4f4f5]">
-                Cross-checks facts across the web and your files
+              <h3 className="text-base font-semibold text-[var(--ink)]">
+                Reviews evidence conflicts
               </h3>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Instead of reading 20 open tabs, Ada reviews them all in parallel, checking public articles against your private notes to find what&apos;s accurate.
+              <p className="text-xs text-[var(--ink-2)] leading-relaxed">
+                When retrieved sources disagree, the workflow can surface the conflict for review. Conclusions depend on the evidence returned for that question.
               </p>
             </div>
 
-            {/* Clean UI Card Preview */}
-            <div className="bg-[#161822] border border-white/[0.08] rounded-lg p-4 font-sans text-xs space-y-2">
-              <span className="text-[10px] font-mono uppercase text-zinc-400 block mb-2">Sources Checked</span>
-              
-              <div className="flex items-center justify-between py-1.5 border-b border-white/[0.04]">
-                <span className="font-mono text-zinc-300 text-[11px]">reuters.com</span>
-                <span className="text-[10px] font-mono text-zinc-300 bg-white/[0.06] border border-white/[0.1] px-2 py-0.5 rounded">Verified</span>
-              </div>
-              <div className="flex items-center justify-between py-1.5 border-b border-white/[0.04]">
-                <span className="font-mono text-zinc-300 text-[11px]">sciencedirect.com</span>
-                <span className="text-[10px] font-mono text-zinc-300 bg-white/[0.06] border border-white/[0.1] px-2 py-0.5 rounded">Verified</span>
-              </div>
-              <div className="flex items-center justify-between py-1.5">
-                <span className="font-mono text-zinc-300 text-[11px]">Your Uploaded PDF</span>
-                <span className="text-[10px] font-mono text-zinc-300 bg-white/[0.06] border border-white/[0.1] px-2 py-0.5 rounded">Cross-Checked</span>
-              </div>
-            </div>
-          </motion.div>
-
-          {/* Card 3: Click to Verify Any Claim */}
-          <motion.div 
-            initial={{ opacity: 0, y: 18 }}
-            whileInView={{ opacity: 1, y: 0 }}
-            viewport={{ once: true }}
-            transition={{ duration: 0.4, delay: 0.2 }}
-            className="bg-[#12131a] border border-white/[0.08] rounded-xl p-6 flex flex-col justify-between space-y-6 hover:border-white/[0.18] transition-all"
-          >
-            <div className="space-y-3">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-zinc-400 font-semibold block">
-                03 / CITATION
+            <div className="p-3 bg-[var(--surface-2)] rounded-[6px] border border-[var(--line)] text-xs font-mono space-y-1.5">
+              <span className="text-[10px] uppercase text-[var(--warn)] font-semibold">
+                Review the evidence
               </span>
-              <h3 className="text-lg font-semibold text-[#f4f4f5]">
-                Every sentence has a real receipt
+              <p className="text-[11px] text-[var(--ink-2)]">
+                Compare source passages and context before accepting a conclusion.
+              </p>
+            </div>
+          </div>
+
+          {/* Card 3: Verifiable Receipts */}
+          <div className="bg-[var(--surface)] border border-[var(--line)] rounded-[10px] p-6 space-y-4 flex flex-col justify-between hover:border-[var(--line-strong)] transition-colors">
+            <div className="space-y-2.5">
+              <span className="text-[11px] font-mono text-[var(--ok)] uppercase font-semibold">
+                03 / Source inspection
+              </span>
+              <h3 className="text-base font-semibold text-[var(--ink)]">
+                Inspect sources and support status
               </h3>
-              <p className="text-xs text-zinc-400 leading-relaxed">
-                Whenever a fact is stated, there&apos;s a numbered link next to it. Click it to read the exact quoted sentence from the original source.
+              <p className="text-xs text-[var(--ink-2)] leading-relaxed">
+                Reports include source references and evidence checks where available. Open the source and verify that it supports the statement in context.
               </p>
             </div>
 
-            {/* Clean UI Card Preview with Subdued Citation */}
-            <div className="bg-[#161822] border border-white/[0.08] rounded-lg p-4 font-sans text-xs space-y-2.5">
-              <div className="text-zinc-200 leading-relaxed font-serif text-xs">
-                &ldquo;Silicon recovery rates reached 95% in commercial recycling facilities across North America&rdquo;
-                <button
-                  type="button"
-                  onClick={() => setCitationOpen(!citationOpen)}
-                  className="citation-badge ml-1"
-                  title="Click to toggle source quote"
-                >
-                  [1]
-                </button>
-              </div>
-
-              {citationOpen && (
-                <div className="bg-[#12131a] border border-white/[0.08] border-l-2 border-l-zinc-400 p-2.5 rounded text-[11px] text-zinc-300 space-y-1">
-                  <span className="text-[10px] font-mono text-zinc-400 uppercase block font-semibold">
-                    Source [1] Verbatim Excerpt
-                  </span>
-                  <p className="text-zinc-300 italic">
-                    &ldquo;...tested yield confirmed 95.2% purity in recovered silicon wafers...&rdquo;
-                  </p>
-                  <span className="text-[10px] font-mono text-zinc-500 block pt-1">
-                    ScienceDirect • Environmental Materials 2025
-                  </span>
-                </div>
-              )}
+            {/* Describes available report evidence without inventing a result or source. */}
+            <div className="p-3 bg-[var(--surface-2)] rounded-[6px] border border-[var(--line)] text-xs space-y-2">
+              <span className="text-[10px] font-mono uppercase tracking-wide text-[var(--ink-3)]">A report may include</span>
+              <ul className="space-y-1 text-[11px] text-[var(--ink-2)]">
+                <li>• A claim with its source reference</li>
+                <li>• A retrieved passage or source link, when available</li>
+                <li>• A support or review status for the claim</li>
+              </ul>
             </div>
-          </motion.div>
+          </div>
         </div>
       </section>
 
-      {/* ─── How It Works (3 Clear Steps) ─────────────────────────── */}
-      <section id="how-it-works" className="relative z-10 py-20 px-6 max-w-5xl mx-auto w-full border-t border-white/[0.08]">
-        <div className="text-center space-y-3 mb-14">
-          <h2 className="text-2xl sm:text-4xl font-serif font-bold text-[#f4f4f5] tracking-tight">
-            How It Works
+      {/* ─── Section 3: How It Works (#how-it-works) ─────────────────── */}
+      <section id="how-it-works" className="w-full max-w-5xl mx-auto px-6 py-20 border-t border-[var(--line)] scroll-mt-12 space-y-12">
+        <div className="text-center space-y-2 max-w-xl mx-auto">
+          <span className="text-xs font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold">
+            Execution Flow
+          </span>
+          <h2 className="text-2xl sm:text-3xl font-serif font-bold text-[var(--ink)] tracking-tight">
+            How Ada conducts deep research
           </h2>
-          <p className="text-sm text-zinc-400">
-            From a simple question to an exhaustive report in three straightforward steps.
+          <p className="text-xs sm:text-sm text-[var(--ink-2)] leading-relaxed">
+            From a scoped question to a report that keeps its sources and evidence checks visible.
           </p>
         </div>
 
         <div className="grid grid-cols-1 sm:grid-cols-3 gap-8">
           <div className="space-y-3">
-            <span className="text-xs font-mono text-zinc-400 font-semibold tracking-wider block">
+            <span className="text-xs font-mono text-[var(--accent)] font-semibold tracking-wider block">
               STEP 01
             </span>
-            <h3 className="text-base font-semibold text-[#f4f4f5]">Type your topic</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed">
-              Enter any question or attach private notes and PDFs you want included in the analysis.
+            <h3 className="text-base font-semibold text-[var(--ink)]">Scope & Clarify</h3>
+            <p className="text-xs text-[var(--ink-2)] leading-relaxed">
+            If a question needs more focus, Ada offers a chance to clarify its scope before the research begins.
             </p>
           </div>
 
           <div className="space-y-3">
-            <span className="text-xs font-mono text-zinc-400 font-semibold tracking-wider block">
+            <span className="text-xs font-mono text-[var(--accent)] font-semibold tracking-wider block">
               STEP 02
             </span>
-            <h3 className="text-base font-semibold text-[#f4f4f5]">Ada investigates</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed">
-              The engine reads dozens of pages across the web and your documents in parallel to check facts.
+            <h3 className="text-base font-semibold text-[var(--ink)]">Find sources and compare</h3>
+            <p className="text-xs text-[var(--ink-2)] leading-relaxed">
+              Ada searches through configured providers, retrieves selected library passages, and records the evidence available to the run.
             </p>
           </div>
 
           <div className="space-y-3">
-            <span className="text-xs font-mono text-zinc-400 font-semibold tracking-wider block">
+            <span className="text-xs font-mono text-[var(--accent)] font-semibold tracking-wider block">
               STEP 03
             </span>
-            <h3 className="text-base font-semibold text-[#f4f4f5]">Read your report</h3>
-            <p className="text-xs text-zinc-400 leading-relaxed">
-              You get a well-organized, readable document with clickable citations for every single claim.
+            <h3 className="text-base font-semibold text-[var(--ink)]">Write a sourced report</h3>
+            <p className="text-xs text-[var(--ink-2)] leading-relaxed">
+              Reports are assembled from retrieved material. Citation and support checks can flag statements that need closer review.
             </p>
           </div>
         </div>
       </section>
 
-      {/* ─── Bottom Call to Action ────────────────────────────────── */}
-      <section className="relative z-10 py-20 px-6 max-w-4xl mx-auto w-full text-center border-t border-white/[0.08] space-y-6">
-        <h2 className="text-3xl sm:text-4xl font-serif font-bold text-[#f4f4f5] tracking-tight">
+      {/* ─── Bottom Call to Action ──────────────────────────────────── */}
+      <section className="w-full max-w-4xl mx-auto px-6 py-20 text-center border-t border-[var(--line)] space-y-6">
+        <h2 className="text-2xl sm:text-4xl font-serif font-bold text-[var(--ink)] tracking-tight">
           Ready to save hours of reading?
         </h2>
-        <p className="text-sm text-zinc-400 max-w-lg mx-auto leading-relaxed">
-          Start investigating with Ada today. Create a free account and run your first research inquiry in seconds.
+        <p className="text-xs sm:text-sm text-[var(--ink-2)] max-w-lg mx-auto leading-relaxed">
+          Launch your first deep research investigation today. No credit card required.
         </p>
-        <div className="pt-2">
+        <div className="pt-2 flex flex-wrap items-center justify-center gap-3">
           <a
             href="/register"
-            className="bg-zinc-200 hover:bg-white text-zinc-950 font-semibold px-7 py-3.5 rounded-lg text-sm inline-flex items-center gap-2 shadow-sm transition-all cursor-pointer"
+            className="btn-primary text-xs px-6 py-2.5"
           >
             <span>Get Started Free</span>
-            <ArrowRight className="w-4 h-4" />
+            <ArrowRight className="w-3.5 h-3.5" />
+          </a>
+          <a
+            href="/login"
+            className="btn-secondary text-xs px-6 py-2.5"
+          >
+            Sign In to Workspace
           </a>
         </div>
       </section>
+      </>
+      )}
 
-      {/* ─── Minimalist Human Footer ──────────────────────────────── */}
-      <footer className="relative z-10 mt-auto border-t border-white/[0.08] py-8 px-6 text-center">
-        <div className="max-w-6xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4 text-xs text-zinc-500">
+      {/* ─── Footer ─────────────────────────────────────────────────── */}
+      <footer className="mt-auto border-t border-[var(--line)] py-8 px-6 text-xs text-[var(--ink-3)]">
+        <div className="max-w-5xl mx-auto flex flex-col sm:flex-row items-center justify-between gap-4">
           <div className="flex items-center gap-2">
-            <span className="font-serif font-bold text-zinc-300">Ada Research</span>
-            <span>•</span>
-            <span>Autonomous Investigation Engine</span>
+            <span className="font-serif font-bold text-[var(--ink)]">Ada Research Desk</span>
+            <span>·</span>
+            <span>Personal research workspace</span>
           </div>
-          <div className="flex items-center gap-6">
-            <a href="/#features" className="hover:text-zinc-300 transition-colors">Features</a>
-            <a href="/#how-it-works" className="hover:text-zinc-300 transition-colors">How It Works</a>
-            <a href="/architecture" className="hover:text-zinc-300 transition-colors">Architecture</a>
-            <a href="/login" className="hover:text-zinc-300 transition-colors">Sign In</a>
-            <a href="/register" className="hover:text-zinc-300 transition-colors">Register</a>
+          <div className="flex items-center gap-6 font-mono text-[11px]">
+            {!user && <a href="#features" className="hover:text-[var(--ink)] transition-colors">Features</a>}
+            {!user && <a href="#how-it-works" className="hover:text-[var(--ink)] transition-colors">How It Works</a>}
+            <Link href="/architecture" className="hover:text-[var(--ink)] transition-colors">Architecture</Link>
+            {user && <Link href="/history" className="hover:text-[var(--ink)] transition-colors">History</Link>}
+            {!user && <Link href="/login" className="hover:text-[var(--ink)] transition-colors">Sign In</Link>}
+            {!user && <Link href="/register" className="hover:text-[var(--ink)] transition-colors">Register</Link>}
           </div>
         </div>
       </footer>
+
+      {/* Screen 7.2: Scoping / Clarification Dialog */}
+      <ClarificationModal
+        isOpen={scopingModalOpen}
+        query={query}
+        blueprint={blueprint}
+        loading={submitting}
+        onClose={() => setScopingModalOpen(false)}
+        onSkip={() => {
+          setScopingModalOpen(false);
+          dispatchRun({});
+        }}
+        onConfirm={(calibrated) => {
+          setScopingModalOpen(false);
+          dispatchRun(calibrated);
+        }}
+      />
     </div>
   );
 }

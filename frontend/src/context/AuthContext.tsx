@@ -1,6 +1,7 @@
 "use client";
 
-import React, { createContext, useContext, useState, useEffect } from "react";
+import React, { createContext, useContext, useState, useEffect, useRef, useCallback } from "react";
+import { useRouter } from "next/navigation";
 import { API_URL } from "@/lib/config";
 
 export interface UserProfile {
@@ -37,38 +38,64 @@ const AuthContext = createContext<AuthContextType>({
 });
 
 export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children }) => {
+  const router = useRouter();
   const [user, setUser] = useState<UserProfile | null>(null);
   const [token, setToken] = useState<string | null>(null);
   const [loading, setLoading] = useState(true);
+  const authRequestId = useRef(0);
+
+  const validateStoredToken = useCallback(async (candidate: string) => {
+    const requestId = ++authRequestId.current;
+    setLoading(true);
+    setToken(candidate);
+    setUser(null);
+    try {
+      const res = await fetch(`${API_URL}/api/auth/me`, {
+        headers: { Authorization: `Bearer ${candidate}` },
+      });
+      if (!res.ok) throw new Error("Invalid token");
+      const userData = await res.json();
+      if (requestId === authRequestId.current) setUser(userData);
+    } catch {
+      if (requestId === authRequestId.current) {
+        localStorage.removeItem("ada_auth_token");
+        setToken(null);
+        setUser(null);
+      }
+    } finally {
+      if (requestId === authRequestId.current) setLoading(false);
+    }
+  }, []);
 
   // Rehydrate auth state on mount
   useEffect(() => {
     const savedToken = localStorage.getItem("ada_auth_token");
     if (savedToken) {
-      setToken(savedToken);
-      fetch(`${API_URL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${savedToken}` }
-      })
-        .then(res => {
-          if (res.ok) return res.json();
-          throw new Error("Invalid token");
-        })
-        .then(userData => {
-          setUser(userData);
-        })
-        .catch(() => {
-          // Token expired or invalid
-          localStorage.removeItem("ada_auth_token");
-          setToken(null);
-          setUser(null);
-        })
-        .finally(() => {
-          setLoading(false);
-        });
+      void validateStoredToken(savedToken);
     } else {
       setLoading(false);
     }
-  }, []);
+  }, [validateStoredToken]);
+
+  // Keep authentication state aligned when a user signs in or out in another tab.
+  useEffect(() => {
+    const syncAuthAcrossTabs = (event: StorageEvent) => {
+      if (event.key !== "ada_auth_token") return;
+      const nextToken = event.newValue;
+      if (!nextToken) {
+        authRequestId.current += 1;
+        setToken(null);
+        setUser(null);
+        setLoading(false);
+        return;
+      }
+
+      void validateStoredToken(nextToken);
+    };
+
+    window.addEventListener("storage", syncAuthAcrossTabs);
+    return () => window.removeEventListener("storage", syncAuthAcrossTabs);
+  }, [validateStoredToken]);
 
   const login = async (loginId: string, pass: string) => {
     try {
@@ -81,9 +108,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!res.ok) {
         return { success: false, error: data.detail || "Login failed" };
       }
+      authRequestId.current += 1;
       localStorage.setItem("ada_auth_token", data.token);
       setToken(data.token);
       setUser(data.user);
+      setLoading(false);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || "Network error" };
@@ -101,9 +130,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       if (!res.ok) {
         return { success: false, error: data.detail || "Registration failed" };
       }
+      authRequestId.current += 1;
       localStorage.setItem("ada_auth_token", data.token);
       setToken(data.token);
       setUser(data.user);
+      setLoading(false);
       return { success: true };
     } catch (err: any) {
       return { success: false, error: err.message || "Network error" };
@@ -111,12 +142,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
   };
 
   const logout = () => {
+    authRequestId.current += 1;
     localStorage.removeItem("ada_auth_token");
     setToken(null);
     setUser(null);
-    if (typeof window !== "undefined") {
-      window.location.href = "/";
-    }
+    setLoading(false);
+    router.replace("/");
   };
 
   const changePassword = async (currentPassword: string, newPassword: string) => {
@@ -142,13 +173,17 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const refreshUser = async () => {
     if (!token) return;
+    const currentToken = token;
     try {
       const res = await fetch(`${API_URL}/api/auth/me`, {
-        headers: { Authorization: `Bearer ${token}` }
+        headers: { Authorization: `Bearer ${currentToken}` }
       });
       if (res.ok) {
         const data = await res.json();
-        setUser(data);
+        // `token` here is the callback's captured value, so comparing it to
+        // `currentToken` never detects a cross-tab sign-out/token replacement.
+        // Read the current persisted token after the request finishes instead.
+        if (localStorage.getItem("ada_auth_token") === currentToken) setUser(data);
       }
     } catch (err) {
       console.warn("refreshUser failed:", err);
