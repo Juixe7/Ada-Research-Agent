@@ -3,6 +3,8 @@
 """
 
 import os
+import time
+import logging
 from typing import Dict, Any, Optional
 from langgraph.graph import StateGraph, START, END
 from engine.graph.state import RunState
@@ -20,6 +22,12 @@ from engine.graph.nodes import (
     finalize_node
 )
 from engine.graph.edges import route_after_research, route_critic
+from engine.budget import ResearchBudget
+from engine.config import MAX_SEARCHES_PER_RUN, MAX_FETCHES_PER_RUN, RUN_TIME_BUDGET_SECONDS
+from engine.celery_app import get_job_state, set_job_state
+from engine.observability import research_run_trace
+
+logger = logging.getLogger(__name__)
 
 def build_research_graph():
     """
@@ -120,6 +128,20 @@ def execute_graph_pipeline(
         Unhandled node, provider, and persistence exceptions propagate to the
         task boundary, which records run failure where possible.
     """
+    def publish_budget_usage(usage: Dict[str, Any]) -> None:
+        """Persist and stream budget changes for the live run view."""
+        if not report_id:
+            return
+        job_state = get_job_state(report_id) or {"report_id": report_id}
+        job_state["budget_usage"] = usage
+        set_job_state(report_id, job_state)
+        try:
+            from engine.events import publish_event
+            publish_event(report_id, "budget_updated", {"budget": usage})
+        except Exception:
+            # Hard limits remain enforced if optional progress delivery fails.
+            logger.exception("Unable to publish budget progress for run %s", report_id)
+
     initial_state: RunState = {
         "run_id": report_id or f"run_{os.urandom(4).hex()}",
         "query": query,
@@ -146,8 +168,27 @@ def execute_graph_pipeline(
         "guard_results": None,
         "scores": None,
         "export_paths": None,
-        "warnings": []
+        "warnings": [],
+        "resource_budget": ResearchBudget(
+            max_searches=MAX_SEARCHES_PER_RUN,
+            max_fetches=MAX_FETCHES_PER_RUN,
+            timeout_seconds=RUN_TIME_BUDGET_SECONDS,
+            on_change=publish_budget_usage if report_id else None,
+        )
     }
 
-    final_state = compiled_research_graph.invoke(initial_state)
+    if report_id:
+        current_job = get_job_state(report_id) or {"report_id": report_id}
+        current_job["budget_deadline_epoch"] = time.time() + RUN_TIME_BUDGET_SECONDS
+        set_job_state(report_id, current_job)
+        publish_budget_usage(initial_state["resource_budget"].snapshot())
+
+    with research_run_trace(report_id, query) as trace:
+        final_state = compiled_research_graph.invoke(initial_state)
+        if trace is not None:
+            trace.update(output={
+                "status": "completed" if final_state.get("report_markdown") else "incomplete",
+                "evidence_count": len(final_state.get("evidence_manifest") or []),
+                "warnings_count": len(final_state.get("warnings") or []),
+            })
     return final_state

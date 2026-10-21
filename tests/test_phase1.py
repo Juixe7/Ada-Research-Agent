@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import pytest
 
 # Add project root to path
 ROOT = Path(__file__).resolve().parent.parent
@@ -9,6 +10,7 @@ from engine.agents.planner import generate_research_plan
 from engine.workers.research_worker import execute_sub_research
 from engine.tasks import run_research_pipeline_sync
 
+@pytest.mark.integration
 def test_phase1_parallel_pipeline():
     test_query = "Commercial viability of sodium ion batteries in electric vehicles by 2026"
 

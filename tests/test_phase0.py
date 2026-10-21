@@ -18,7 +18,10 @@ def test_phase0_foundations():
     However, supply chain constraints in HBM3e memory packages limited gross margins by 120 basis points.
     Management expects Q4 guidance to exceed consensus by 8-10%, projecting full year revenue of $58B.
     """
+    test_user_id = "test-phase0-user"
     chunks = process_raw_text_document(sample_doc, doc_name="Titan_Q3_Report.pdf")
+    for chunk in chunks:
+        chunk["user_id"] = test_user_id
     print(f"Generated {len(chunks)} chunks.")
     assert len(chunks) > 0, "No chunks generated"
 
@@ -29,7 +32,7 @@ def test_phase0_foundations():
     assert indexed > 0, "No chunks indexed"
 
     query = "What were the supply chain constraints in Project Titan?"
-    results = vs.search_user_docs(query, top_k=2)
+    results = vs.search_user_docs(query, top_k=2, user_id=test_user_id)
     print(f"Search query: '{query}'")
     for r in results:
         print(f"  [Match: Score {r['score']}] (Doc: {r['doc_name']} | Page {r['page_number']})")

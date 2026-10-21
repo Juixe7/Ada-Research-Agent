@@ -51,6 +51,10 @@ LLM_DEFAULT_RPM = int(os.getenv("LLM_DEFAULT_RPM", "60"))
 LLM_DEFAULT_TPM = int(os.getenv("LLM_DEFAULT_TPM", "100000"))
 RUN_COST_BUDGET_USD = float(os.getenv("RUN_COST_BUDGET_USD", "5.0"))
 RUN_TOKEN_BUDGET = int(os.getenv("RUN_TOKEN_BUDGET", "250000"))
+MAX_SEARCHES_PER_RUN = int(os.getenv("MAX_SEARCHES_PER_RUN", "30"))
+MAX_FETCHES_PER_RUN = int(os.getenv("MAX_FETCHES_PER_RUN", "20"))
+RUN_TIME_BUDGET_SECONDS = int(os.getenv("RUN_TIME_BUDGET_SECONDS", "900"))
+RESEARCH_CONCURRENCY = int(os.getenv("RESEARCH_CONCURRENCY", "3"))
 
 # --- Embeddings & Vector DB ---
 EMBEDDING_MODEL_NAME = "BAAI/bge-small-en-v1.5"

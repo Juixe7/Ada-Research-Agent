@@ -74,7 +74,7 @@ export default function AdaPrismLogo({
             >
               Ada
             </span>
-              <span className="text-[11px] font-sans font-semibold tracking-wide text-[var(--ink-3)]">
+              <span className="max-[360px]:hidden text-[11px] font-sans font-semibold tracking-wide text-[var(--ink-3)]">
               Research
             </span>
           </div>

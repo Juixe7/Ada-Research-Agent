@@ -84,6 +84,7 @@ export default function RegisterPage() {
                   type="email"
                   autoFocus
                   required
+                  autoComplete="email"
                   value={email}
                   onChange={(e) => setEmail(e.target.value)}
                   placeholder="name@organization.com"
@@ -98,6 +99,7 @@ export default function RegisterPage() {
                 <input
                   type="text"
                   required
+                  autoComplete="username"
                   value={username}
                   onChange={(e) => setUsername(e.target.value)}
                   placeholder="analyst_handle"
@@ -112,6 +114,7 @@ export default function RegisterPage() {
                 <input
                   type="password"
                   required
+                  autoComplete="new-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"

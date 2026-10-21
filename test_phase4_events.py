@@ -3,6 +3,7 @@ import sys
 import json
 import uuid
 import asyncio
+import pytest
 from pathlib import Path
 
 # Add project root and packages to PYTHONPATH
@@ -13,9 +14,7 @@ sys.path.insert(0, str(ROOT_DIR / "packages" / "llm_gateway"))
 from dotenv import load_dotenv
 load_dotenv(ROOT_DIR / ".env")
 
-def test_1_event_publishing_and_persistence():
-    """Verify event publishing persists typed events to PostgreSQL with strictly monotonic sequence numbers."""
-    print("\n--- Test 1: Event Publishing & Durable Persistence ---")
+def _seed_event_run():
     from engine.events import publish_event
     from engine.storage.relational_store import RelationalStore
 
@@ -44,17 +43,29 @@ def test_1_event_publishing_and_persistence():
     assert stored_events[1]["event"] == "query_issued"
     assert stored_events[2]["event"] == "source_discovered"
 
-    print(f"✓ All 3 events persisted with monotonic sequences to PostgreSQL:")
-    for ev in stored_events:
-        print(f"  [seq={ev['seq']}] event='{ev['event']}' id={ev['id']}")
-
     return test_run_id, e1["id"], e2["id"], e3["id"]
 
 
-def test_2_sse_reconnection_replay(test_run_id: str, e1_id: str):
+@pytest.fixture
+def event_context():
+    return _seed_event_run()
+
+
+def test_1_event_publishing_and_persistence():
+    """Verify event publishing persists typed events with monotonic sequence numbers."""
+    print("\n--- Test 1: Event Publishing & Durable Persistence ---")
+    test_run_id, _, _, _ = _seed_event_run()
+    from engine.storage.relational_store import RelationalStore
+    stored_events = RelationalStore.get_events(test_run_id)
+    assert [event["seq"] for event in stored_events] == [1, 2, 3]
+    assert [event["event"] for event in stored_events] == ["stage_changed", "query_issued", "source_discovered"]
+
+
+def test_2_sse_reconnection_replay(event_context):
     """Verify that reconnecting with Last-Event-Id replays only missed subsequent events."""
     print("\n--- Test 2: SSE Reconnection Replay (Last-Event-Id) ---")
     from engine.storage.relational_store import RelationalStore
+    test_run_id, e1_id, _, _ = event_context
 
     # Client reconnects having seen e1_id
     replayed = RelationalStore.get_events(test_run_id, after_id=e1_id)
@@ -67,10 +78,11 @@ def test_2_sse_reconnection_replay(test_run_id: str, e1_id: str):
         print(f"  [Replayed seq={ev['seq']}] event='{ev['event']}' id={ev['id']}")
 
 
-def test_3_async_sse_generator(test_run_id: str):
+def test_3_async_sse_generator(event_context):
     """Verify the async SSE generator yields ServerSentEvent instances with replay and live broadcast."""
     print("\n--- Test 3: Async SSE Generator Stream ---")
     from engine.events import run_event_generator, publish_event
+    test_run_id, _, _, _ = event_context
 
     async def consume_generator():
         # Publish final completion event to conclude the stream
@@ -113,11 +125,29 @@ def test_4_fastapi_sse_endpoint():
 
     endpoint_run_id = f"test_http_{uuid.uuid4().hex[:8]}"
 
+    from engine.auth import create_access_token
+    from engine.database import SessionLocal
+    from engine.models import User
+    test_user_id = str(uuid.uuid4())
+    db = SessionLocal()
+    try:
+        db.add(User(
+            id=test_user_id,
+            email=f"{test_user_id}@example.test",
+            username=f"evt_{test_user_id[:12]}",
+            password_hash="test-only",
+        ))
+        db.commit()
+    finally:
+        db.close()
+    token = create_access_token(test_user_id, f"{test_user_id}@example.test", f"evt_{test_user_id[:12]}")
+
     # Create run and pre-populate events
     RelationalStore.create_run(
         question="Testing HTTP SSE stream",
         run_id=endpoint_run_id,
-        settings={"depth": "quick"}
+        settings={"depth": "quick"},
+        user_id=test_user_id,
     )
     publish_event(endpoint_run_id, "stage_changed", {"stage": "planning", "progress": 15})
     publish_event(endpoint_run_id, "run_completed", {"report_id": endpoint_run_id})
@@ -126,7 +156,11 @@ def test_4_fastapi_sse_endpoint():
     async def run_client():
         transport = httpx.ASGITransport(app=app)
         async with httpx.AsyncClient(transport=transport, base_url="http://test") as ac:
-            async with ac.stream("GET", f"/api/v1/runs/{endpoint_run_id}/events") as response:
+            async with ac.stream(
+                "GET",
+                f"/api/v1/runs/{endpoint_run_id}/events",
+                headers={"Authorization": f"Bearer {token}"},
+            ) as response:
                 assert response.status_code == 200
                 assert "text/event-stream" in response.headers.get("content-type", "")
 

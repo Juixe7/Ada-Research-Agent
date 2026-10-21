@@ -5,8 +5,7 @@
 import time
 import json
 import re
-import os
-import threading
+import logging
 from typing import Optional, Dict, Any, List, Type
 from pydantic import BaseModel, ValidationError
 
@@ -14,35 +13,13 @@ import litellm
 from packages.llm_gateway.models import LLMResult, TokenUsage, ModelGroup
 from packages.llm_gateway.limiter import TokenBucketLimiter
 from packages.llm_gateway.cache import ResponseCache
-from packages.llm_gateway.tracing import trace_id_for_run
+from packages.llm_gateway.observability import llm_generation
+
+logger = logging.getLogger(__name__)
 
 # Silence litellm telemetry and ensure unsupported params are safely ignored per provider
 litellm.drop_params = True
 litellm.telemetry = False
-
-_langfuse_setup_lock = threading.Lock()
-_langfuse_configured = False
-
-
-def _configure_langfuse() -> None:
-    """Enable LiteLLM's Langfuse callback only when explicitly configured."""
-    global _langfuse_configured
-    if os.getenv("LANGFUSE_ENABLED", "false").strip().lower() not in {"1", "true", "yes", "on"}:
-        return
-    with _langfuse_setup_lock:
-        if _langfuse_configured:
-            return
-        required = ("LANGFUSE_PUBLIC_KEY", "LANGFUSE_SECRET_KEY")
-        missing = [name for name in required if not os.getenv(name, "").strip()]
-        if missing:
-            print("[langfuse] Enabled but credentials are missing; tracing is disabled.")
-            return
-        callbacks = list(getattr(litellm, "callbacks", None) or [])
-        if "langfuse_otel" not in callbacks:
-            callbacks.append("langfuse_otel")
-        litellm.callbacks = callbacks
-        _langfuse_configured = True
-        print("[langfuse] LiteLLM tracing enabled.")
 
 # Default Model Groups (Verified Groq & Gemini endpoints)
 DEFAULT_MODEL_GROUPS = {
@@ -90,7 +67,6 @@ class LLMClient:
         self.groups = model_groups or DEFAULT_MODEL_GROUPS
         self.limiter = limiter or TokenBucketLimiter()
         self.cache = cache or ResponseCache()
-        _configure_langfuse()
 
     def complete(
         self,
@@ -276,14 +252,6 @@ class LLMClient:
             "max_tokens": max_tokens,
             "timeout": timeout,
         }
-        if run_id and os.getenv("LANGFUSE_ENABLED", "false").strip().lower() in {"1", "true", "yes", "on"}:
-            agent = agent_name or str(group or "research")
-            kwargs["metadata"] = {
-                "trace_id": trace_id_for_run(str(run_id)),
-                "session_id": str(run_id),
-                "generation_name": f"ada.{agent}",
-                "tags": ["ada", f"agent:{agent}", f"group:{group or 'unknown'}"],
-            }
         if json_mode:
             has_json = any("json" in m.get("content", "").lower() for m in messages)
             if not has_json and "groq" in model.lower():
@@ -299,18 +267,42 @@ class LLMClient:
 
         for attempt in range(2):
             try:
-                resp = litellm.completion(**kwargs)
-                content = resp.choices[0].message.content or ""
-                usage_raw = getattr(resp, "usage", None)
-                in_tok = usage_raw.prompt_tokens if usage_raw else 0
-                out_tok = usage_raw.completion_tokens if usage_raw else 0
+                with llm_generation(
+                    run_id=run_id,
+                    agent_name=agent_name or str(group or "research"),
+                    model=model,
+                    messages=kwargs["messages"],
+                    temperature=temperature,
+                    max_tokens=max_tokens,
+                ) as observation:
+                    resp = litellm.completion(**kwargs)
+                    content = resp.choices[0].message.content or ""
+                    usage_raw = getattr(resp, "usage", None)
+                    in_tok = usage_raw.prompt_tokens if usage_raw else 0
+                    out_tok = usage_raw.completion_tokens if usage_raw else 0
 
-                # Estimate cost via LiteLLM if available
-                cost = 0.0
-                try:
-                    cost = litellm.completion_cost(completion_response=resp)
-                except Exception:
-                    pass
+                    # Estimate cost via LiteLLM if available.
+                    cost = 0.0
+                    try:
+                        cost = litellm.completion_cost(completion_response=resp)
+                    except Exception:
+                        pass
+
+                    if observation is not None:
+                        try:
+                            observation.update(
+                                output=content.strip(),
+                                usage_details={
+                                    "input": int(in_tok),
+                                    "output": int(out_tok),
+                                    "total": int(in_tok + out_tok),
+                                },
+                                cost_details={"total_cost": float(cost)} if cost else None,
+                            )
+                        except Exception:
+                            # Telemetry must never turn a successful provider
+                            # response into a failed attempt or trigger fallback.
+                            logger.warning("Unable to update the Langfuse generation", exc_info=True)
 
                 return {
                     "success": True,

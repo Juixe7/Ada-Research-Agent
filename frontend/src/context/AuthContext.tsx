@@ -26,6 +26,21 @@ interface AuthContextType {
   refreshUser: () => Promise<void>;
 }
 
+function apiErrorMessage(detail: unknown, fallback: string): string {
+  if (typeof detail === "string" && detail.trim()) return detail;
+  if (Array.isArray(detail)) {
+    const messages = detail.flatMap((item) => {
+      if (typeof item === "string") return [item];
+      if (item && typeof item === "object" && "msg" in item && typeof item.msg === "string") {
+        return [item.msg];
+      }
+      return [];
+    }).filter(Boolean);
+    if (messages.length) return messages.join("; ");
+  }
+  return fallback;
+}
+
 const AuthContext = createContext<AuthContextType>({
   user: null,
   token: null,
@@ -46,16 +61,16 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   const validateStoredToken = useCallback(async (candidate: string) => {
     const requestId = ++authRequestId.current;
-    setLoading(true);
-    setToken(candidate);
-    setUser(null);
     try {
       const res = await fetch(`${API_URL}/api/auth/me`, {
         headers: { Authorization: `Bearer ${candidate}` },
       });
       if (!res.ok) throw new Error("Invalid token");
       const userData = await res.json();
-      if (requestId === authRequestId.current) setUser(userData);
+      if (requestId === authRequestId.current) {
+        setToken(candidate);
+        setUser(userData);
+      }
     } catch {
       if (requestId === authRequestId.current) {
         localStorage.removeItem("ada_auth_token");
@@ -69,12 +84,12 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
 
   // Rehydrate auth state on mount
   useEffect(() => {
-    const savedToken = localStorage.getItem("ada_auth_token");
-    if (savedToken) {
-      void validateStoredToken(savedToken);
-    } else {
-      setLoading(false);
-    }
+    const timer = window.setTimeout(() => {
+      const savedToken = localStorage.getItem("ada_auth_token");
+      if (savedToken) void validateStoredToken(savedToken);
+      else setLoading(false);
+    }, 0);
+    return () => window.clearTimeout(timer);
   }, [validateStoredToken]);
 
   // Keep authentication state aligned when a user signs in or out in another tab.
@@ -90,6 +105,9 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
         return;
       }
 
+      setLoading(true);
+      setToken(null);
+      setUser(null);
       void validateStoredToken(nextToken);
     };
 
@@ -106,7 +124,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       const data = await res.json();
       if (!res.ok) {
-        return { success: false, error: data.detail || "Login failed" };
+        return { success: false, error: apiErrorMessage(data.detail, "Login failed") };
       }
       authRequestId.current += 1;
       localStorage.setItem("ada_auth_token", data.token);
@@ -114,8 +132,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(data.user);
       setLoading(false);
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message || "Network error" };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : "Network error" };
     }
   };
 
@@ -128,7 +146,7 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       const data = await res.json();
       if (!res.ok) {
-        return { success: false, error: data.detail || "Registration failed" };
+        return { success: false, error: apiErrorMessage(data.detail, "Registration failed") };
       }
       authRequestId.current += 1;
       localStorage.setItem("ada_auth_token", data.token);
@@ -136,8 +154,8 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       setUser(data.user);
       setLoading(false);
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message || "Network error" };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : "Network error" };
     }
   };
 
@@ -163,11 +181,11 @@ export const AuthProvider: React.FC<{ children: React.ReactNode }> = ({ children
       });
       const data = await res.json();
       if (!res.ok) {
-        return { success: false, error: data.detail || "Password change failed" };
+        return { success: false, error: apiErrorMessage(data.detail, "Password change failed") };
       }
       return { success: true };
-    } catch (err: any) {
-      return { success: false, error: err.message || "Network error" };
+    } catch (err: unknown) {
+      return { success: false, error: err instanceof Error ? err.message : "Network error" };
     }
   };
 

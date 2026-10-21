@@ -3,11 +3,11 @@
 import React, { useState, useEffect, useRef } from "react";
 import { useRouter } from "next/navigation";
 import {
-  Search, FileText, Plus, Database, Clock,
-  ExternalLink, ArrowRight, CornerDownLeft, Sparkles, X
+  Search, FileText, Clock, CornerDownLeft, Sparkles
 } from "lucide-react";
 import { API_URL } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
+import type { ResearchReportSummary, VaultDocumentSummary } from "@/lib/api-types";
 
 interface PaletteItem {
   id: string;
@@ -25,8 +25,10 @@ export default function CommandPalette() {
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState("");
   const [selectedIndex, setSelectedIndex] = useState(0);
-  const [runs, setRuns] = useState<any[]>([]);
-  const [docs, setDocs] = useState<any[]>([]);
+  const [runResults, setRunResults] = useState<{ token: string | null; items: ResearchReportSummary[] }>({ token: null, items: [] });
+  const [docResults, setDocResults] = useState<{ token: string | null; items: VaultDocumentSummary[] }>({ token: null, items: [] });
+  const runs = runResults.token === token ? runResults.items : [];
+  const docs = docResults.token === token ? docResults.items : [];
 
   const inputRef = useRef<HTMLInputElement>(null);
 
@@ -35,6 +37,10 @@ export default function CommandPalette() {
     const handleKeyDown = (e: KeyboardEvent) => {
       if ((e.ctrlKey || e.metaKey) && e.key.toLowerCase() === "k") {
         e.preventDefault();
+        if (!isOpen) {
+          setQuery("");
+          setSelectedIndex(0);
+        }
         setIsOpen((prev) => !prev);
       } else if (e.key === "Escape" && isOpen) {
         setIsOpen(false);
@@ -47,25 +53,33 @@ export default function CommandPalette() {
 
   // Focus input when opened
   useEffect(() => {
-    if (isOpen) {
-      setTimeout(() => inputRef.current?.focus(), 50);
-      // Fetch runs and vault docs
-      const headers: Record<string, string> = {};
-      if (token) headers["Authorization"] = `Bearer ${token}`;
+    if (!isOpen) return;
 
-      fetch(`${API_URL}/api/reports`, { headers })
-        .then((r) => (r.ok ? r.json() : { reports: [] }))
-        .then((d) => setRuns(d.reports?.slice(0, 5) || []))
-        .catch(() => {});
+    const focusTimer = window.setTimeout(() => inputRef.current?.focus(), 50);
+    const controller = new AbortController();
+    const headers: Record<string, string> = {};
+    if (token) headers.Authorization = `Bearer ${token}`;
 
-      fetch(`${API_URL}/api/vault`, { headers })
-        .then((r) => (r.ok ? r.json() : { documents: [] }))
-        .then((d) => setDocs(d.documents?.slice(0, 5) || []))
-        .catch(() => {});
-    } else {
-      setQuery("");
-      setSelectedIndex(0);
+    fetch(`${API_URL}/api/reports`, { headers, signal: controller.signal })
+      .then((response) => (response.ok ? response.json() : { reports: [] }))
+      .then((data: { reports?: ResearchReportSummary[] }) => setRunResults({ token, items: data.reports?.slice(0, 5) ?? [] }))
+      .catch((error: unknown) => {
+        if (!(error instanceof DOMException && error.name === "AbortError")) setRunResults({ token, items: [] });
+      });
+
+    if (token) {
+      fetch(`${API_URL}/api/vault`, { headers, signal: controller.signal })
+        .then((response) => (response.ok ? response.json() : { documents: [] }))
+        .then((data: { documents?: VaultDocumentSummary[] }) => setDocResults({ token, items: data.documents?.slice(0, 5) ?? [] }))
+        .catch((error: unknown) => {
+          if (!(error instanceof DOMException && error.name === "AbortError")) setDocResults({ token, items: [] });
+        });
     }
+
+    return () => {
+      window.clearTimeout(focusTimer);
+      controller.abort();
+    };
   }, [isOpen, token]);
 
   // Build items list

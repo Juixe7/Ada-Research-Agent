@@ -1,15 +1,28 @@
 "use client";
 
-import React, { useState, useEffect, useRef, use } from "react";
+import React, { useState, useEffect, useRef, use, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
-  ArrowLeft, Search, FileText, ExternalLink, AlertTriangle,
-  Check, Clock, X, ChevronDown, ChevronRight, Filter,
-  RotateCcw, BookOpen, ShieldCheck, ArrowUpRight
+  ArrowLeft, AlertTriangle, ChevronDown,
+  ChevronRight, ArrowUpRight
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
+import RunActivityFeed from "@/components/run/RunActivityFeed";
+import RunSourcesPanel from "@/components/run/RunSourcesPanel";
+import { useRunEventStream } from "@/hooks/useRunEventStream";
 import { API_URL } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
+import type {
+  ActivityEvent,
+  IncomingRunEvent,
+  ResearchBudgetUsage,
+  RunEventPayload,
+  RunSource,
+  RunStatus,
+  RunStatusSnapshot,
+} from "@/lib/research-run-types";
+import { toPipelineStage } from "@/lib/research-run-utils";
+import { toActivityEvent } from "@/lib/run-event-activity";
 
 // Pipeline 6-stage definition matching Blueprint & Design Guide Section 7.3
 const PIPELINE_STAGES = [
@@ -30,32 +43,56 @@ interface ResearchTrack {
   progress_pct: number;
 }
 
-interface ActivityEvent {
-  id: string;
-  timestamp: string;
-  stage: string;
-  type: string;
-  text: string;
-  rawQuery?: string;
-  domain?: string;
-  criticFinding?: {
-    claim?: string;
-    conflictingValues?: string[];
-    resolution?: string;
-  };
+interface RunSourceRecord {
+  source_id?: string;
+  title?: string;
+  url?: string | null;
+  domain?: string | null;
+  authority_tier?: number | null;
+  published_at?: string | null;
+  snippet?: string | null;
+  kind?: string;
 }
 
-interface SourceItem {
-  id: string;
-  title: string;
-  url: string;
-  domain: string;
-  date?: string;
-  authorityDots: number; // 1 to 5
-  isVault: boolean;
-  excerpt?: string;
-  trackId?: string | number;
-  isNew?: boolean;
+interface RunTrackRecord {
+  id?: string | number;
+  title?: string;
+  status?: ResearchTrack["status"];
+  sources_count?: number;
+  queries_count?: number;
+}
+
+interface RunLlmCallRecord {
+  tokens_in?: number;
+  tokens_out?: number;
+}
+
+interface RunEventRecord {
+  id?: string;
+  seq?: number;
+  type?: string;
+  payload?: RunEventPayload;
+}
+
+interface RunDetails {
+  query?: string;
+  depth?: string;
+  status?: string;
+  stage?: string;
+  created_at?: string;
+  completed_at?: string;
+  sources?: RunSourceRecord[];
+  tracks?: RunTrackRecord[];
+  llm_calls?: RunLlmCallRecord[];
+  events?: RunEventRecord[];
+  budgets?: { token_limit?: number; search_limit?: number; fetch_limit?: number };
+  budget_usage?: Partial<ResearchBudgetUsage>;
+}
+
+/** Parse API timestamps, whose legacy naive ISO values are stored as UTC. */
+function parseApiTimestamp(value: string): number {
+  const hasTimezone = /(?:Z|[+-]\d{2}:?\d{2})$/i.test(value);
+  return new Date(hasTimezone ? value : `${value}Z`).getTime();
 }
 
 export default function LiveInvestigationHeroPage({
@@ -64,7 +101,10 @@ export default function LiveInvestigationHeroPage({
   params: Promise<{ id: string }>;
 }) {
   const resolvedParams = use(params);
-  const runId = resolvedParams.id;
+  return <RunInvestigation key={resolvedParams.id} runId={resolvedParams.id} />;
+}
+
+function RunInvestigation({ runId }: { runId: string }) {
   const router = useRouter();
   const { token, loading: authLoading } = useAuth();
 
@@ -75,23 +115,23 @@ export default function LiveInvestigationHeroPage({
   }, [authLoading, token, router, runId]);
 
   // Run Metadata
-  const [query, setQuery] = useState("Research run");
+  const [query, setQuery] = useState("");
   const [depth, setDepth] = useState("standard");
-  const [status, setStatus] = useState<"running" | "completed" | "failed" | "cancelled">("running");
+  const [status, setStatus] = useState<RunStatus>("loading");
   const [runLoaded, setRunLoaded] = useState(false);
   const [runLoadError, setRunLoadError] = useState(false);
   const [activeStage, setActiveStage] = useState("gather");
   const [stageProgressNote, setStageProgressNote] = useState("Gathering web evidence & vault docs");
   const [elapsedSec, setElapsedSec] = useState(0);
   const [startedAt, setStartedAt] = useState<number | null>(null);
-  const [reconnected, setReconnected] = useState(false);
-  const lastEventId = useRef<string | null>(null);
+  const [lastEventId, setLastEventId] = useState<string | null>(null);
 
   // Counters & Budget
   const [tokensUsed, setTokensUsed] = useState(0);
-  const [tokensBudget] = useState(250000);
-  const [fetchedCount, setFetchedCount] = useState(0);
-  const [fetchLimit] = useState(30);
+  const [tokensBudget, setTokensBudget] = useState(0);
+  const [budgetUsage, setBudgetUsage] = useState({
+    searches_used: 0, searches_limit: 0, fetches_used: 0, fetches_limit: 0,
+  });
 
   // Layout Panels
   const [tracks, setTracks] = useState<ResearchTrack[]>([]);
@@ -103,11 +143,11 @@ export default function LiveInvestigationHeroPage({
   const [selectedStageFilter, setSelectedStageFilter] = useState<string | "all">("all");
   const [userScrolledUp, setUserScrolledUp] = useState(false);
   const activityScrollRef = useRef<HTMLDivElement>(null);
+  const handleIncomingEventRef = useRef<(evt: IncomingRunEvent) => void>(() => undefined);
 
-  // Right Sources Drawer
-  const [sources, setSources] = useState<SourceItem[]>([]);
-  const [sourceFilter, setSourceFilter] = useState<"all" | "vault" | "web">("all");
-  const [selectedEvidenceSource, setSelectedEvidenceSource] = useState<SourceItem | null>(null);
+  // Evidence records arrive during initial load and the event stream.
+  const [sources, setSources] = useState<RunSource[]>([]);
+  const knownSourceUrlsRef = useRef<Set<string>>(new Set());
 
   // Cancel Confirmation Modal
   const [cancelModalOpen, setCancelModalOpen] = useState(false);
@@ -125,45 +165,72 @@ export default function LiveInvestigationHeroPage({
   // Initial Fetch of Run State
   useEffect(() => {
     if (authLoading || !token) return;
+    const controller = new AbortController();
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    fetch(`${API_URL}/api/v1/runs/${runId}`, { headers })
-      .then(async (response) => {
-        if (response.ok) return response.json();
-        const fallback = await fetch(`${API_URL}/api/report/status/${runId}`, { headers });
-        return fallback.ok ? fallback.json() : null;
+    fetch(`${API_URL}/api/v1/runs/${runId}`, { headers, signal: controller.signal })
+      .then(async (response): Promise<RunDetails | null> => {
+        if (response.ok) return response.json() as Promise<RunDetails>;
+        const fallback = await fetch(`${API_URL}/api/report/status/${runId}`, { headers, signal: controller.signal });
+        return fallback.ok ? await fallback.json() as RunDetails : null;
       })
-      .then((data) => {
+      .then((data: RunDetails | null) => {
         if (!data) {
           setRunLoadError(true);
           return;
         }
         if (data.query) setQuery(data.query);
         if (data.depth) setDepth(data.depth);
+        if (data.budgets?.token_limit) setTokensBudget(Number(data.budgets.token_limit));
+        if (data.budgets) {
+          setBudgetUsage((current) => ({
+            ...current,
+            searches_limit: Number(data.budgets?.search_limit || 0),
+            fetches_limit: Number(data.budgets?.fetch_limit || 0),
+          }));
+        }
+        if (data.budget_usage) setBudgetUsage((current) => ({ ...current, ...data.budget_usage }));
+        if (Array.isArray(data.sources)) {
+          const initialSources = data.sources.map((source, index): RunSource => {
+            const authorityScore = Number(source.authority_tier);
+            return {
+              id: source.source_id || String(index + 1),
+              title: source.title || source.domain || "Untitled source",
+              url: source.url || "",
+              domain: source.domain || "",
+              date: source.published_at || "",
+              authorityDots: Number.isFinite(authorityScore) && source.authority_tier != null
+                ? Math.min(5, Math.max(1, Math.round(authorityScore > 1 ? authorityScore : authorityScore * 5)))
+                : null,
+              isVault: source.kind === "doc",
+              excerpt: source.snippet || "",
+            };
+          });
+          knownSourceUrlsRef.current = new Set(initialSources.map((source) => source.url));
+          setSources(initialSources);
+        }
         if (data.created_at) {
-          const created = new Date(data.created_at).getTime();
+          const created = parseApiTimestamp(data.created_at);
           if (Number.isFinite(created)) {
             setStartedAt(created);
-            setElapsedSec(Math.max(0, Math.floor((Date.now() - created) / 1000)));
+            const completed = data.completed_at ? parseApiTimestamp(data.completed_at) : Date.now();
+            setElapsedSec(Math.max(0, Math.floor((completed - created) / 1000)));
           }
         }
         if (data.status) {
-          setStatus(["completed", "failed", "cancelled"].includes(data.status) ? data.status : "running");
+          const terminalStatuses = ["completed", "failed", "cancelled"] as const;
+          const normalizedStatus = data.status.toLowerCase();
+          setStatus(terminalStatuses.includes(normalizedStatus as typeof terminalStatuses[number])
+            ? normalizedStatus as typeof terminalStatuses[number]
+            : "running");
         }
         if (data.stage) setStageProgressNote(data.stage);
-        if (data.stage) {
-          const stage = String(data.stage).toLowerCase();
-          if (/scop/.test(stage)) setActiveStage("scope");
-          else if (/plan/.test(stage)) setActiveStage("plan");
-          else if (/scrap|gather|research/.test(stage)) setActiveStage("gather");
-          else if (/critic|audit|arbiter/.test(stage)) setActiveStage("audit");
-          else if (/synth|outline|write|assembl/.test(stage)) setActiveStage("write");
-          else if (/verif|score|final|export/.test(stage)) setActiveStage("verify");
-        }
+        const initialPipelineStage = toPipelineStage(data.stage);
+        if (initialPipelineStage) setActiveStage(initialPipelineStage);
         if (data.tracks && data.tracks.length > 0) {
           setTracks(
-            data.tracks.map((t: any, idx: number) => ({
+            data.tracks.map((t, idx) => ({
               id: t.id || idx + 1,
               title: t.title || `Track ${idx + 1}`,
               status: t.status || "pending",
@@ -174,141 +241,40 @@ export default function LiveInvestigationHeroPage({
           );
         }
         if (Array.isArray(data.events) && data.events.length) {
-          const orderedEvents = [...data.events].sort((a: any, b: any) => Number(a.seq || 0) - Number(b.seq || 0));
-          lastEventId.current = orderedEvents[orderedEvents.length - 1]?.id || null;
-          orderedEvents.forEach((event: any) => handleIncomingEvent({ event: event.type, data: event.payload }));
+          const orderedEvents = [...data.events].sort((a, b) => Number(a.seq || 0) - Number(b.seq || 0));
+          setLastEventId(orderedEvents[orderedEvents.length - 1]?.id || null);
+          orderedEvents.forEach((event) => handleIncomingEventRef.current({ event: event.type, data: event.payload }));
+        }
+        if (Array.isArray(data.llm_calls)) {
+          setTokensUsed(data.llm_calls.reduce((total: number, call) =>
+            total + Number(call.tokens_in || 0) + Number(call.tokens_out || 0), 0));
         }
       })
       .catch((err) => {
+        if (err instanceof Error && err.name === "AbortError") return;
         console.warn("Run initial state warning:", err);
         setRunLoadError(true);
       })
-      .finally(() => setRunLoaded(true));
+      .finally(() => {
+        if (!controller.signal.aborted) setRunLoaded(true);
+      });
+    return () => controller.abort();
   }, [runId, token, authLoading]);
 
-  // Connect to SSE stream
-  useEffect(() => {
-    if (authLoading || !token || !runLoaded || status !== "running") return;
-    const controller = new AbortController();
-    let fallbackPoll: ReturnType<typeof setInterval> | null = null;
-    const headers: Record<string, string> = { Accept: "text/event-stream" };
-    if (token) headers.Authorization = `Bearer ${token}`;
-    if (lastEventId.current) headers["Last-Event-ID"] = lastEventId.current;
-
-    const checkStatusFallback = async () => {
-      try {
-        const res = await fetch(`${API_URL}/api/report/status/${runId}`, {
-          headers: token ? { Authorization: `Bearer ${token}` } : {},
-          signal: controller.signal,
-        });
-        if (!res.ok) return;
-        const d = await res.json();
-        const terminalStatus = String(d.status || "").toLowerCase();
-        if (terminalStatus === "completed" || terminalStatus === "failed" || terminalStatus === "cancelled") {
-          setStatus(terminalStatus);
-          if (fallbackPoll) clearInterval(fallbackPoll);
-        }
-        if (d.query) setQuery(d.query);
-        if (d.stage) setStageProgressNote(d.stage);
-      } catch (e) {
-        // quiet catch
-      }
-    };
-
-    const startFallbackPolling = () => {
-      if (fallbackPoll) return;
-      void checkStatusFallback();
-      fallbackPoll = setInterval(checkStatusFallback, 3000);
-    };
-
-    const connect = async () => {
-      try {
-        const response = await fetch(`${API_URL}/api/v1/runs/${runId}/events`, {
-          headers,
-          signal: controller.signal,
-        });
-        if (!response.ok || !response.body) throw new Error(`Event stream returned ${response.status}`);
-        setReconnected(true);
-        window.setTimeout(() => setReconnected(false), 2500);
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = "";
-        let receivedTerminalEvent = false;
-        while (!controller.signal.aborted) {
-          const { value, done } = await reader.read();
-          if (done) break;
-          buffer += decoder.decode(value, { stream: true }).replace(/\r\n/g, "\n");
-          let boundary = buffer.indexOf("\n\n");
-          while (boundary >= 0) {
-            const frame = buffer.slice(0, boundary);
-            buffer = buffer.slice(boundary + 2);
-            let eventName = "message";
-            const dataLines: string[] = [];
-            for (const line of frame.split("\n")) {
-              if (line.startsWith("event:")) eventName = line.slice(6).trim();
-              if (line.startsWith("id:")) lastEventId.current = line.slice(3).trim();
-              if (line.startsWith("data:")) dataLines.push(line.slice(5).trimStart());
-            }
-            if (dataLines.length) {
-              try {
-                const eventData = JSON.parse(dataLines.join("\n"));
-                handleIncomingEvent({ event: eventName, data: eventData });
-                if (
-                  ["run_completed", "run_failed", "run_cancelled"].includes(eventName) ||
-                  (eventName === "stage_changed" && ["completed", "failed", "cancelled"].includes(String(eventData.status || "").toLowerCase()))
-                ) {
-                  receivedTerminalEvent = true;
-                }
-              } catch (err) {
-                console.warn("Event parse error:", err);
-              }
-            }
-            boundary = buffer.indexOf("\n\n");
-          }
-        }
-        // A graceful SSE close can happen after a proxy or server restart without
-        // delivering the terminal event. Keep the UI in sync from durable status.
-        if (!controller.signal.aborted && !receivedTerminalEvent) {
-          startFallbackPolling();
-        }
-      } catch (err) {
-        if (!controller.signal.aborted) {
-          startFallbackPolling();
-          console.warn("Run event stream disconnected; using status polling.", err);
-        }
-      }
-    };
-    void connect();
-
-    return () => {
-      controller.abort();
-      if (fallbackPoll) clearInterval(fallbackPoll);
-    };
-  }, [runId, token, authLoading, runLoaded, status]);
-
-  function handleIncomingEvent(evt: any) {
+  const handleIncomingEvent = useCallback((evt: IncomingRunEvent) => {
     const evtType = evt.event || evt.type || "unknown";
     const data = evt.data || {};
-    const timeStr = new Date().toLocaleTimeString(undefined, {
-      hour12: false,
-      hour: "2-digit",
-      minute: "2-digit",
-      second: "2-digit",
-    });
 
-    // Update Stage Mapping
+    if (evtType === "budget_updated" && data.budget) {
+      setBudgetUsage((current) => ({ ...current, ...data.budget }));
+    }
+
     if (evtType === "stage_changed") {
       const stage = String(data.stage || data.status || "").toLowerCase();
-      if (["completed", "failed", "cancelled"].includes(String(data.status || "").toLowerCase())) {
-        setStatus(String(data.status).toLowerCase() as "completed" | "failed" | "cancelled");
-      }
+      // A stage update must not hide the later terminal event's final telemetry.
       setStageProgressNote(data.stage || stage || "Research in progress");
-      if (/scop/.test(stage)) setActiveStage("scope");
-      else if (/plan/.test(stage)) setActiveStage("plan");
-      else if (/scrap|gather|research/.test(stage)) setActiveStage("gather");
-      else if (/critic|audit|arbiter/.test(stage)) setActiveStage("audit");
-      else if (/synth|outline|write|assembl/.test(stage)) setActiveStage("write");
-      else if (/verif|score|final/.test(stage)) setActiveStage("verify");
+      const pipelineStage = toPipelineStage(stage);
+      if (pipelineStage) setActiveStage(pipelineStage);
     } else if (evtType === "run_started" || evtType === "scope_completed") {
       setActiveStage("plan");
     } else if (evtType === "plan_completed" || evtType === "track_started") {
@@ -321,6 +287,8 @@ export default function LiveInvestigationHeroPage({
       setActiveStage("verify");
     } else if (evtType === "run_completed") {
       setStatus("completed");
+      if (data.budget) setBudgetUsage((current) => ({ ...current, ...data.budget }));
+      setTracks((current) => current.map((track) => ({ ...track, status: "completed", progress_pct: 100 })));
       setActiveStage("verify");
     } else if (evtType === "run_failed") {
       setStatus("failed");
@@ -328,22 +296,19 @@ export default function LiveInvestigationHeroPage({
       setStatus("cancelled");
     }
 
-    // Build Activity Row
-    let newActivity: ActivityEvent | null = null;
+    if (evtType === "search_executed" || evtType === "section_synthesized" || evtType === "section_drafted") {
+      const tokens = Number(data.tokens_used || data.tokens || 0);
+      if (tokens) setTokensUsed((current) => current + tokens);
+    } else if (evtType === "llm_call_completed") {
+      const tokens = Number(data.tokens_in || 0) + Number(data.tokens_out || 0);
+      setTokensUsed((current) => current + tokens);
+    }
 
-    if (evtType === "search_executed") {
-      const q = data.query || "web search";
-      newActivity = {
-        id: String(Date.now() + Math.random()),
-        timestamp: timeStr,
-        stage: "gather",
-        type: "search",
-        text: `Searching `,
-        rawQuery: q,
-      };
-      if (data.tokens_used) setTokensUsed((t) => t + Number(data.tokens_used));
-      else if (data.tokens) setTokensUsed((t) => t + Number(data.tokens));
-    } else if (evtType === "source_fetched" || evtType === "source_discovered") {
+    if ((evtType === "research_warning" || evtType === "provider_degraded") && data.budget) {
+      setBudgetUsage((current) => ({ ...current, ...data.budget }));
+    }
+
+    if (evtType === "source_fetched" || evtType === "source_discovered") {
       const url = data.url || "";
       let domain = data.domain || "external";
       if (!data.domain && url) {
@@ -353,97 +318,89 @@ export default function LiveInvestigationHeroPage({
           domain = "external";
         }
       }
-      setFetchedCount((c) => c + 1);
-      newActivity = {
-        id: String(Date.now() + Math.random()),
-        timestamp: timeStr,
-        stage: "gather",
-        type: "read",
-        text: `Reading `,
-        domain,
-      };
 
-      // Add to Sources Drawer
-      setSources((prev) => {
-        if (prev.some((s) => s.url === url)) return prev;
+      // Deduplicate before scheduling state updates. Updater functions stay pure,
+      // and repeated SSE events do not inflate a track's source count.
+      if (!knownSourceUrlsRef.current.has(url)) {
+        knownSourceUrlsRef.current.add(url);
         const authScore = data.authority || data.authority_score;
-        const newSrc: SourceItem = {
-          id: String(prev.length + 1),
+        const newSource: RunSource = {
+          id: url || String(Date.now() + Math.random()),
           title: data.title || domain,
           url,
           domain,
           date: data.published_date || "",
-          authorityDots: authScore ? (authScore > 1 ? Math.min(5, Math.round(authScore)) : Math.min(5, Math.max(1, Math.round(authScore * 5)))) : (data.is_vault ? 5 : 3),
+          authorityDots: authScore != null && Number.isFinite(Number(authScore))
+            ? (Number(authScore) > 1 ? Math.min(5, Math.round(Number(authScore))) : Math.min(5, Math.max(1, Math.round(Number(authScore) * 5))))
+            : null,
           isVault: Boolean(data.is_vault || data.source_type === "user_doc"),
           excerpt: data.excerpt || data.snippet || "",
+          trackId: data.track_id,
           isNew: true,
         };
-        return [newSrc, ...prev];
-      });
-    } else if (evtType === "evidence_extracted") {
-      newActivity = {
-        id: String(Date.now() + Math.random()),
-        timestamp: timeStr,
-        stage: "gather",
-        type: "evidence",
-        text: `Extracted evidence passages (${data.count || data.total_evidence_units || 0})`,
-      };
-    } else if (evtType === "research_warning" || evtType === "provider_degraded") {
-      newActivity = {
-        id: String(Date.now() + Math.random()),
-        timestamp: timeStr,
-        stage: "gather",
-        type: "warning",
-        text: String(data.message || data.detail || data.error || "A research service was unavailable."),
-      };
-    } else if (evtType === "critic_completed") {
-      newActivity = {
-        id: String(Date.now() + Math.random()),
-        timestamp: timeStr,
-        stage: "audit",
-        type: "critic",
-        text: `Adversarial audit completed: cross-checked claims`,
-        criticFinding: data.finding
-          ? {
-              claim: data.finding.claim,
-              conflictingValues: data.finding.conflicting_values,
-              resolution: data.finding.resolution,
-            }
-          : undefined,
-      };
-    } else if (evtType === "section_synthesized" || evtType === "section_drafted") {
-      newActivity = {
-        id: String(Date.now() + Math.random()),
-        timestamp: timeStr,
-        stage: "write",
-        type: "write",
-        text: `Drafted chapter: ${data.section_title || "Section synthesis"}`,
-      };
-      if (data.tokens_used) setTokensUsed((t) => t + Number(data.tokens_used));
-      else if (data.tokens) setTokensUsed((t) => t + Number(data.tokens));
-    } else if (evtType === "query_issued") {
+        setSources((current) => [newSource, ...current]);
+        if (data.track_id != null) {
+          setTracks((current) => current.map((track) => track.id === data.track_id
+            ? { ...track, sources_count: track.sources_count + 1 }
+            : track));
+        }
+      }
+    } else if (evtType === "query_issued" && data.track_id != null) {
       const queries = Array.isArray(data.queries) ? data.queries : [];
-      newActivity = {
-        id: String(Date.now() + Math.random()),
-        timestamp: timeStr,
-        stage: "plan",
-        type: "search",
-        text: `Planned ${queries.length || 1} search ${queries.length === 1 ? "query" : "queries"} for ${data.category || data.track_id || "a research track"}`,
-        rawQuery: data.sub_question || queries[0],
-      };
+      setTracks((current) => current.some((track) =>
+        track.id === data.track_id || track.title === data.sub_question
+      )
+        ? current
+        : [...current, {
+            id: data.track_id!,
+            title: data.sub_question || "Research track " + (current.length + 1),
+            status: "pending",
+            sources_count: 0,
+            queries_count: queries.length,
+            progress_pct: 0,
+          }]);
     }
 
-    if (newActivity) {
-      setEvents((prev) => [...prev, newActivity!]);
-      if (!userScrolledUp && activityScrollRef.current) {
-        setTimeout(() => {
-          if (activityScrollRef.current) {
-            activityScrollRef.current.scrollTop = activityScrollRef.current.scrollHeight;
-          }
-        }, 50);
-      }
+    const activity = toActivityEvent(evt);
+    if (!activity) return;
+    setEvents((current) => [...current, activity]);
+    if (!userScrolledUp && activityScrollRef.current) {
+      window.setTimeout(() => {
+        if (activityScrollRef.current) {
+          activityScrollRef.current.scrollTop = activityScrollRef.current.scrollHeight;
+        }
+      }, 50);
     }
-  }
+  }, [userScrolledUp]);
+  const handleStatusSnapshot = useCallback((snapshot: RunStatusSnapshot) => {
+    const normalizedStatus = String(snapshot.status || "").toLowerCase();
+    if (["completed", "failed", "cancelled"].includes(normalizedStatus)) {
+      setStatus(normalizedStatus as RunStatus);
+    }
+    if (snapshot.query) setQuery(snapshot.query);
+    if (snapshot.stage) {
+      setStageProgressNote(snapshot.stage);
+      const pipelineStage = toPipelineStage(snapshot.stage);
+      if (pipelineStage) setActiveStage(pipelineStage);
+    }
+    if (snapshot.budget_usage) {
+      setBudgetUsage((current) => ({ ...current, ...snapshot.budget_usage }));
+    }
+  }, []);
+
+  const { reconnected } = useRunEventStream({
+    runId,
+    token,
+    enabled: !authLoading && runLoaded,
+    status,
+    initialLastEventId: lastEventId,
+    onEvent: handleIncomingEvent,
+    onStatus: handleStatusSnapshot,
+  });
+
+  useEffect(() => {
+    handleIncomingEventRef.current = handleIncomingEvent;
+  }, [handleIncomingEvent]);
 
   const handleCancelRun = async () => {
     setCancelling(true);
@@ -509,6 +466,19 @@ export default function LiveInvestigationHeroPage({
     );
   }
 
+  if (!runLoaded) {
+    return (
+      <main className="min-h-screen bg-[var(--paper)] text-[var(--ink)]">
+        <Navbar />
+        <div className="mx-auto max-w-3xl px-6 py-20" role="status" aria-live="polite">
+          <p className="text-xs font-mono uppercase tracking-wider text-[var(--ink-3)]">Research workspace</p>
+          <h1 className="mt-3 font-serif text-2xl">Restoring this investigation…</h1>
+          <p className="mt-2 text-sm text-[var(--ink-2)]">Loading its saved sources, activity, and current stage.</p>
+        </div>
+      </main>
+    );
+  }
+
   if (status === "failed" || status === "cancelled") {
     const wasCancelled = status === "cancelled";
     return (
@@ -539,17 +509,6 @@ export default function LiveInvestigationHeroPage({
       </div>
     );
   }
-
-  const filteredEvents = events.filter((e) => {
-    if (selectedStageFilter !== "all" && e.stage !== selectedStageFilter) return false;
-    return true;
-  });
-
-  const filteredSources = sources.filter((s) => {
-    if (sourceFilter === "vault" && !s.isVault) return false;
-    if (sourceFilter === "web" && s.isVault) return false;
-    return true;
-  });
 
   // Calculate Stage Index for linear strip
   const currentStageIdx = PIPELINE_STAGES.findIndex((s) => s.id === activeStage);
@@ -610,7 +569,6 @@ export default function LiveInvestigationHeroPage({
               {PIPELINE_STAGES.map((stg, idx) => {
                 const isDone = idx < currentStageIdx || status === "completed";
                 const isActive = idx === currentStageIdx && status === "running";
-                const isPending = idx > currentStageIdx && status !== "completed";
 
                 return (
                   <button
@@ -750,218 +708,35 @@ export default function LiveInvestigationHeroPage({
           </div>
         </aside>
 
-        {/* ── Column 2: ACTIVITY STREAM (Centre, quiet log) ─────────── */}
-        <main className="flex-1 flex flex-col bg-[var(--paper)] relative overflow-hidden min-h-[400px]">
-          <div className="px-5 py-3 border-b border-[var(--line)] flex items-center justify-between bg-[var(--surface)]">
-            <div className="flex items-center gap-2">
-              <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold">
-                Activity Stream
-              </span>
-              {selectedStageFilter !== "all" && (
-                <span className="text-[10px] font-mono text-[var(--accent)] bg-[var(--accent-soft)] px-1.5 py-0.5 rounded-[3px]">
-                  stage: {selectedStageFilter}
-                </span>
-              )}
-            </div>
-
-            {userScrolledUp && (
-              <button
-                type="button"
-                onClick={() => {
-                  setUserScrolledUp(false);
-                  if (activityScrollRef.current) {
-                    activityScrollRef.current.scrollTop = activityScrollRef.current.scrollHeight;
-                  }
-                }}
-                className="chip text-[11px] text-[var(--accent)] border-[var(--accent)]"
-              >
-                Jump to latest ↓
-              </button>
-            )}
-          </div>
-
-          {/* Activity Log List */}
-          <div
-            ref={activityScrollRef}
-            onScroll={(e) => {
-              const el = e.currentTarget;
-              const isAtBottom = el.scrollHeight - el.scrollTop - el.clientHeight < 50;
-              setUserScrolledUp(!isAtBottom);
-            }}
-            className="flex-1 overflow-y-auto p-5 space-y-3 font-sans text-xs"
-          >
-            {filteredEvents.length === 0 ? (
-              <div className="h-full flex flex-col items-center justify-center text-center text-[var(--ink-3)] py-12 space-y-2">
-                <span className="w-2 h-2 rounded-full bg-[var(--accent)] animate-quiet-pulse" />
-                <p className="font-mono text-xs">Waiting for agent activity telemetry...</p>
-              </div>
-            ) : (
-              filteredEvents.map((evt) => {
-                const isCritic = evt.type === "critic";
-                const isWarning = evt.type === "warning";
-                return (
-                  <div
-                    key={evt.id}
-                    className={`flex items-start gap-3 py-1.5 ${
-                      isCritic || isWarning
-                        ? "border-l-2 border-[var(--warn)] pl-3 bg-[var(--warn-soft)]/30 rounded-r-[4px] py-2"
-                        : ""
-                    }`}
-                  >
-                    {/* Monospace Timestamp */}
-                    <span className="font-mono text-[11px] text-[var(--ink-3)] shrink-0 pt-0.5">
-                      {evt.timestamp}
-                    </span>
-
-                    {/* Icon + Log line */}
-                    <div className="flex-1 text-[var(--ink)] leading-relaxed">
-                      <span className="text-[var(--ink-2)]">{evt.text}</span>
-                      {evt.rawQuery && (
-                        <code className="font-mono text-[11.5px] text-[var(--ink)] bg-[var(--surface-2)] px-1.5 py-0.5 rounded-[3px] ml-1">
-                          &ldquo;{evt.rawQuery}&rdquo;
-                        </code>
-                      )}
-                      {evt.domain && (
-                        <a
-                          href={`https://${evt.domain}`}
-                          target="_blank"
-                          rel="noreferrer"
-                          className="font-mono text-[11.5px] text-[var(--accent)] hover:underline ml-1"
-                        >
-                          {evt.domain}
-                        </a>
-                      )}
-
-                      {/* Expandable Critic Finding */}
-                      {evt.criticFinding && (
-                        <div className="mt-2 p-2 bg-[var(--surface)] border border-[var(--line)] rounded-[4px] space-y-1 text-xs">
-                          <span className="text-[10px] font-mono uppercase text-[var(--warn)] font-semibold block">
-                            Adversarial Conflict Detected
-                          </span>
-                          <p className="text-[var(--ink)] font-medium">
-                            {evt.criticFinding.claim}
-                          </p>
-                          {evt.criticFinding.conflictingValues && (
-                            <div className="font-mono text-[11px] text-[var(--ink-2)] pt-1 space-y-0.5">
-                              {evt.criticFinding.conflictingValues.map((v, vi) => (
-                                <div key={vi}>• {v}</div>
-                              ))}
-                            </div>
-                          )}
-                          {evt.criticFinding.resolution && (
-                            <p className="text-[11px] text-[var(--ink-3)] italic pt-1 border-t border-[var(--line)] mt-1">
-                              Resolution: {evt.criticFinding.resolution}
-                            </p>
-                          )}
-                        </div>
-                      )}
-                    </div>
-                  </div>
-                );
-              })
-            )}
-          </div>
-        </main>
-
-        {/* ── Column 3: SOURCES DRAWER (Right, 380px) ──────────────── */}
-        <aside className="w-full md:w-[380px] shrink-0 bg-[var(--surface)] hairline-l flex flex-col">
-          <div className="px-4 py-3 border-b border-[var(--line)] flex items-center justify-between">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold">
-              Evidence Sources ({filteredSources.length})
-            </span>
-
-            {/* Filter chips: All, Vault, Web */}
-            <div className="flex items-center gap-1">
-              <button
-                type="button"
-                onClick={() => setSourceFilter("all")}
-                className={`chip text-[10px] py-0.5 px-2 ${sourceFilter === "all" ? "chip-active" : ""}`}
-              >
-                All
-              </button>
-              <button
-                type="button"
-                onClick={() => setSourceFilter("web")}
-                className={`chip text-[10px] py-0.5 px-2 ${sourceFilter === "web" ? "chip-active" : ""}`}
-              >
-                Web
-              </button>
-              <button
-                type="button"
-                onClick={() => setSourceFilter("vault")}
-                className={`chip text-[10px] py-0.5 px-2 ${sourceFilter === "vault" ? "chip-active" : ""}`}
-              >
-                Vault
-              </button>
-            </div>
-          </div>
-
-          {/* Sources List */}
-          <div className="flex-1 overflow-y-auto p-3 space-y-2.5">
-            {filteredSources.length === 0 ? (
-              <div className="py-12 text-center text-xs text-[var(--ink-3)] font-mono">
-                No sources ingested yet. Crawlers gathering...
-              </div>
-            ) : (
-              filteredSources.map((src) => (
-                <div
-                  key={src.id}
-                  onClick={() => setSelectedEvidenceSource(src)}
-                  className={`p-3 rounded-[6px] border border-[var(--line)] bg-[var(--surface-2)]/50 hover:bg-[var(--surface-2)] transition-colors cursor-pointer space-y-2 ${
-                    src.isNew ? "animate-feed-highlight" : ""
-                  }`}
-                >
-                  <div className="flex items-start justify-between gap-2">
-                    <h4 className="text-xs font-sans font-medium text-[var(--ink)] line-clamp-2 leading-snug">
-                      {src.title}
-                    </h4>
-                    <span className="text-[10px] font-mono text-[var(--ink-3)] shrink-0">
-                      {src.date}
-                    </span>
-                  </div>
-
-                  <div className="flex items-center justify-between text-[11px] font-mono text-[var(--ink-3)]">
-                    <span className="text-[var(--accent)] truncate max-w-[180px]">
-                      {src.domain}
-                    </span>
-
-                    {/* Authority Dots (1 to 5) */}
-                    <div className="flex items-center gap-1" title={`Authority: ${src.authorityDots}/5`}>
-                      {[1, 2, 3, 4, 5].map((dot) => (
-                        <span
-                          key={dot}
-                          className={`w-1 h-1 rounded-full ${
-                            dot <= src.authorityDots
-                              ? "bg-[var(--ink-2)]"
-                              : "bg-[var(--line-strong)]"
-                          }`}
-                        />
-                      ))}
-                    </div>
-                  </div>
-
-                  {src.excerpt && (
-                    <p className="font-serif text-[11.5px] text-[var(--ink-2)] line-clamp-2 italic leading-relaxed pt-1 border-t border-[var(--line)]">
-                      &ldquo;{src.excerpt}&rdquo;
-                    </p>
-                  )}
-                </div>
-              ))
-            )}
-          </div>
-        </aside>
+        <RunActivityFeed
+          events={events}
+          selectedStage={selectedStageFilter}
+          userScrolledUp={userScrolledUp}
+          scrollRef={activityScrollRef}
+          onScrollStateChange={setUserScrolledUp}
+          onJumpToLatest={() => {
+            setUserScrolledUp(false);
+            const element = activityScrollRef.current;
+            if (element) element.scrollTop = element.scrollHeight;
+          }}
+        />
+        <RunSourcesPanel sources={sources} status={status} />
       </div>
 
       {/* ─── Bottom Status Bar (32px high, Section 7.3 spec) ──────────── */}
       <footer className="h-8 bg-[var(--surface)] hairline-t px-6 flex items-center justify-between text-xs font-mono text-[var(--ink-3)] select-none">
         <div className="flex items-center gap-4">
           <span>
-            Tokens {(tokensUsed / 1000).toFixed(1)}k / {(tokensBudget / 1000).toFixed(0)}k
+            Tokens {(tokensUsed / 1000).toFixed(1)}k{tokensBudget ? ` / ${(tokensBudget / 1000).toFixed(0)}k` : ""}
           </span>
           <span>·</span>
           <span>
-            Fetched {fetchedCount} / {fetchLimit}
+            Sources {sources.length}
           </span>
+          <span>·</span>
+          <span>Searches {budgetUsage.searches_used}/{budgetUsage.searches_limit || "—"}</span>
+          <span>·</span>
+          <span>Fetches {budgetUsage.fetches_used}/{budgetUsage.fetches_limit || "—"}</span>
         </div>
 
         {/* Budget Meter turning --warn at 80% */}
@@ -970,11 +745,11 @@ export default function LiveInvestigationHeroPage({
           <div className="w-20 h-1.5 bg-[var(--line)] rounded-full overflow-hidden">
             <div
               className={`h-full ${
-                tokensUsed / tokensBudget > 0.8
+                tokensBudget > 0 && tokensUsed / tokensBudget > 0.8
                   ? "bg-[var(--warn)]"
                   : "bg-[var(--accent)]"
               }`}
-              style={{ width: `${Math.min(100, (tokensUsed / tokensBudget) * 100)}%` }}
+              style={{ width: `${tokensBudget ? Math.min(100, (tokensUsed / tokensBudget) * 100) : 0}%` }}
             />
           </div>
         </div>
@@ -1023,67 +798,6 @@ export default function LiveInvestigationHeroPage({
         </div>
       )}
 
-      {/* Source Evidence Inspector Drawer / Popover */}
-      {selectedEvidenceSource && (
-        <div className="fixed inset-0 z-50 flex items-center justify-end bg-black/40">
-          <div className="w-full max-w-md h-full bg-[var(--surface)] border-l border-[var(--line)] p-6 flex flex-col justify-between shadow-2xl">
-            <div className="space-y-4">
-              <div className="flex items-center justify-between pb-3 border-b border-[var(--line)]">
-                <span className="text-[11px] font-mono uppercase text-[var(--ink-3)]">
-                  Evidence Inspector
-                </span>
-                <button
-                  type="button"
-                  onClick={() => setSelectedEvidenceSource(null)}
-                  className="p-1 text-[var(--ink-3)] hover:text-[var(--ink)]"
-                >
-                  <X className="w-4 h-4" />
-                </button>
-              </div>
-
-              <h2 className="font-serif text-[18px] text-[var(--ink)] leading-snug">
-                {selectedEvidenceSource.title}
-              </h2>
-
-              <div className="text-xs font-mono text-[var(--ink-2)] space-y-1">
-                <div>Domain: {selectedEvidenceSource.domain}</div>
-                <div>Published: {selectedEvidenceSource.date || "Unknown"}</div>
-                <div>Authority Score: {selectedEvidenceSource.authorityDots}/5</div>
-              </div>
-
-              <div className="pt-3 border-t border-[var(--line)]">
-                <span className="text-[11px] font-mono uppercase text-[var(--ink-3)] block mb-2">
-                  Verbatim Passage Excerpt
-                </span>
-                <p className="font-serif text-xs text-[var(--ink)] leading-relaxed bg-[var(--surface-2)] p-3 rounded-[6px] border border-[var(--line)] italic">
-                  &ldquo;{selectedEvidenceSource.excerpt}&rdquo;
-                </p>
-              </div>
-            </div>
-
-            <div className="pt-4 border-t border-[var(--line)] flex items-center justify-between">
-              {selectedEvidenceSource.url && (
-                <a
-                  href={selectedEvidenceSource.url}
-                  target="_blank"
-                  rel="noreferrer"
-                  className="btn-secondary text-xs flex items-center gap-1.5"
-                >
-                  <span>Open original URL</span>
-                  <ExternalLink className="w-3.5 h-3.5" />
-                </a>
-              )}
-              <button
-                type="button"
-                onClick={() => setSelectedEvidenceSource(null)}
-                className="btn-primary text-xs"
-              >
-                Done
-              </button>
-            </div>
-          </div>
-        </div>
-      )}
     </div>
   );
 }

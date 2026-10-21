@@ -26,7 +26,9 @@ def extract_quantitative_metrics(evidence_manifest: List[Dict[str, Any]]) -> Lis
                     continue
                 if not all(v.get(key) is not None for key in ("metric", "value", "context")):
                     continue
-                if str(v.get("value", "")).strip() not in str(v.get("context", "")):
+                value = " ".join(str(v.get("value", "")).split()).casefold()
+                source_text = " ".join(str(ev.get("text", "")).split()).casefold()
+                if not value or value not in source_text:
                     continue
                 key = (v.get("metric"), v.get("value"), sid)
                 if key not in seen:
@@ -147,7 +149,7 @@ def format_evidence_xml_subset(source_ids: List[str], evidence_by_id: Dict[str, 
             continue
         stype = ev.get("source_type", "web")
         title = html.escape(ev.get("title", "Untitled Source"))
-        auth = ev.get("authority_score", 0.7)
+        auth = ev.get("authority_score")
         if stype == "user_doc":
             dname = html.escape(ev.get("doc_name", "User Doc"))
             pnum = ev.get("page_number", 1)
@@ -303,7 +305,9 @@ Draft the definitive Executive Title and Executive Intelligence Briefing (TL;DR)
         else:
             url = ev.get("url", "#")
             domain = ev.get("domain", "web")
-            bib_lines.append(f"- **[{sid}]** [{title}]({url}) — *{domain}* (Authority: {ev.get('authority_score', 0.7):.2f})")
+            authority = ev.get("authority_score")
+            estimate = f"(Heuristic authority estimate: {float(authority):.2f})" if authority is not None else "(Authority not measured)"
+            bib_lines.append(f"- **[{sid}]** [{title}]({url}) — *{domain}* {estimate}")
 
     final_report = f"{exec_briefing}\n\n{combined_body}\n{''.join(bib_lines)}"
     return final_report

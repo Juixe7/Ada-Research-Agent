@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import pytest
 
 # Add project root to path
 ROOT = Path(__file__).resolve().parent.parent
@@ -9,6 +10,7 @@ from engine.ingest.doc_processor import process_raw_text_document
 from engine.storage.vector_store import get_vector_store
 from engine.tasks import run_research_pipeline_sync
 
+@pytest.mark.integration
 def test_phase3_full_deep_research():
     print("=== 1. PRE-SEEDING PRIVATE USER DOCUMENT (QDRANT) ===")
     private_doc = """
@@ -19,7 +21,10 @@ def test_phase3_full_deep_research():
     Key engineering bottleneck: actuator thermal throttling after 45 minutes of continuous high-payload manipulation.
     Target commercial rollout: 500 units deployed across Tier-1 logistics hubs by Q4 2026.
     """
+    test_user_id = "test-phase3-user"
     chunks = process_raw_text_document(private_doc, doc_name="Model_H_Internal_Pilot.pdf")
+    for chunk in chunks:
+        chunk["user_id"] = test_user_id
     vs = get_vector_store()
     vs.index_document_chunks(chunks)
     print(f"Pre-seeded {len(chunks)} private document chunks into Qdrant.")
@@ -31,7 +36,8 @@ def test_phase3_full_deep_research():
         query=test_query,
         depth="quick",
         include_user_docs=True,
-        max_workers=3
+        max_workers=3,
+        user_id=test_user_id,
     )
 
     print("\n" + "="*60)

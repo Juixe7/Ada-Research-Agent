@@ -6,6 +6,7 @@ from typing import Any, Dict, List, Tuple
 
 _TOKEN_RE = re.compile(r"[a-z0-9]{3,}", re.IGNORECASE)
 _STOPWORDS = {
+    "a", "an", "as", "at", "be", "by", "for", "in", "is", "it", "of", "on", "or", "the", "to",
     "about", "after", "against", "also", "and", "are", "because", "been", "before",
     "being", "between", "can", "could", "does", "from", "have", "into", "more",
     "most", "other", "our", "report", "should", "some", "than", "that", "their",

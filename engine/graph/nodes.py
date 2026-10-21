@@ -7,6 +7,7 @@ import concurrent.futures
 import hashlib
 import re
 from typing import Dict, Any, List, Optional
+from urllib.parse import urlsplit, urlunsplit
 from engine.graph.state import RunState, SectionSpec
 from engine.celery_app import get_job_state, set_job_state
 from engine.agents.planner import generate_research_plan
@@ -18,6 +19,18 @@ from engine.agents.claim_verifier import verify_claims
 from engine.export.exporter import export_research_dossier
 from engine.storage.relational_store import RelationalStore
 from engine.events import publish_event
+from engine.config import RESEARCH_CONCURRENCY
+
+_NASA_PUBLISHER_SUFFIX_RE = re.compile(
+    r"\s*(?:\||[-–—])\s*nasa\s+(?:science|jet propulsion laboratory(?:\s*\(jpl\))?|jpl)\s*$",
+    re.IGNORECASE,
+)
+
+
+def _web_title_fingerprint(title: str) -> str:
+    """Normalize NASA-branded titles to identify syndicated announcement copies."""
+    normalized = _NASA_PUBLISHER_SUFFIX_RE.sub("", title or "").casefold()
+    return re.sub(r"[^a-z0-9]+", " ", normalized).strip()
 
 def _notify_stage(run_id: Optional[str], status: str, stage: str, progress: int, extra: Optional[Dict[str, Any]] = None):
     """Pushes job progress to Redis/memory state, updates relational store, and broadcasts SSE stage_changed event."""
@@ -50,13 +63,26 @@ def _is_cancelled(run_id: Optional[str]) -> bool:
     return bool(current and current.get("status") == "cancelled")
 
 def normalize_and_deduplicate_evidence(raw_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Deduplicate repeated passages, preserving distinct chunks from one PDF page."""
+    """Deduplicate repeated passages and obvious syndicated NASA copies.
+
+    Exact content/URL duplicates are merged as before. Long identical headlines
+    with common NASA publisher suffixes are also collapsed to one citation; the
+    retained record aggregates originating track IDs and alternate URLs.
+    """
     seen_keys: Dict[str, Dict[str, Any]] = {}
+    seen_web_titles: Dict[str, Dict[str, Any]] = {}
     clean_list = []
     doc_idx = 1
     web_idx = 1
 
-    for item in raw_list:
+    # Let the strongest available web source win when a headline is syndicated.
+    ordered_items = sorted(
+        raw_list,
+        key=lambda item: float(item.get("authority_score") or 0) if item.get("source_type", "web") != "user_doc" else -1,
+        reverse=True,
+    )
+
+    for item in ordered_items:
         stype = item.get("source_type", "web")
         if stype == "user_doc":
             passage_id = item.get("chunk_id")
@@ -75,18 +101,32 @@ def normalize_and_deduplicate_evidence(raw_list: List[Dict[str, Any]]) -> List[D
                 if existing and item.get("track_id"):
                     existing["track_ids"] = list(dict.fromkeys([*(existing.get("track_ids") or []), str(item["track_id"])]))
         else:
-            url = item.get("url", "").split("?")[0].rstrip("/")
-            key = f"web::{url}" if url else f"title::{item.get('title', '')[:40]}"
-            if key not in seen_keys:
+            raw_url = item.get("canonical_url") or item.get("url") or ""
+            parts = urlsplit(raw_url)
+            host = (parts.hostname or "").lower().removeprefix("www.")
+            path = parts.path.rstrip("/")
+            canonical_url = urlunsplit((parts.scheme.lower(), host, path, "", "")) if host else ""
+            item["canonical_url"] = canonical_url or None
+            content_hash = item.get("content_hash")
+            key = f"content::{content_hash}" if content_hash else f"web::{canonical_url}" if canonical_url else f"title::{item.get('title', '')[:40]}"
+            title_fingerprint = _web_title_fingerprint(item.get("title", ""))
+            title_key = title_fingerprint if len(title_fingerprint.split()) >= 6 else ""
+            existing = seen_keys.get(key) or (seen_web_titles.get(title_key) if title_key else None)
+            if not existing:
                 item["source_id"] = f"S{web_idx}"
                 item["track_ids"] = list(dict.fromkeys([str(item.get("track_id", ""))] if item.get("track_id") else []))
                 web_idx += 1
                 seen_keys[key] = item
+                if title_key:
+                    seen_web_titles[title_key] = item
                 clean_list.append(item)
             else:
-                existing = seen_keys[key]
                 if existing and item.get("track_id"):
                     existing["track_ids"] = list(dict.fromkeys([*(existing.get("track_ids") or []), str(item["track_id"])]))
+                if existing and item.get("url") and item.get("url") != existing.get("url"):
+                    existing.setdefault("alternate_source_urls", [])
+                    if item["url"] not in existing["alternate_source_urls"]:
+                        existing["alternate_source_urls"].append(item["url"])
 
     return clean_list
 
@@ -112,7 +152,8 @@ def scope_node(state: RunState) -> Dict[str, Any]:
         "brief": brief,
         "track_status": {},
         "round": 0,
-        "max_rounds": 2 if settings.get("depth") == "deep" else 1
+        "max_rounds": 2 if settings.get("depth") == "deep" else 1,
+        "warnings": list(state.get("warnings", [])),
     }
 
 
@@ -163,6 +204,7 @@ def research_node(state: RunState) -> Dict[str, Any]:
     selected_docs = settings.get("selected_docs")
     user_id = settings.get("user_id")
     blocked_domains = settings.get("blocked_domains") or []
+    budget = state.get("resource_budget")
     if _is_cancelled(run_id):
         return {}
     cancel_check = lambda: _is_cancelled(run_id)
@@ -176,7 +218,7 @@ def research_node(state: RunState) -> Dict[str, Any]:
     research_warnings = list(state.get("warnings", []))
     track_status = dict(state.get("track_status", {}))
 
-    with concurrent.futures.ThreadPoolExecutor(max_workers=min(4, len(plan) or 1)) as executor:
+    with concurrent.futures.ThreadPoolExecutor(max_workers=min(RESEARCH_CONCURRENCY, len(plan) or 1)) as executor:
         futures = {
             executor.submit(
                 execute_iterative_sub_research,
@@ -187,7 +229,8 @@ def research_node(state: RunState) -> Dict[str, Any]:
                 selected_docs,
                 user_id,
                 blocked_domains,
-                cancel_check
+                cancel_check,
+                budget,
             ): track
             for track in plan
         }
@@ -220,6 +263,14 @@ def research_node(state: RunState) -> Dict[str, Any]:
             all_raw_evidence.append(item)
 
     all_evidence = normalize_and_deduplicate_evidence(all_raw_evidence)
+    if budget:
+        usage = budget.snapshot()
+        if usage["limits_reached"]:
+            budget_warning = "Research stopped at a configured run limit; report coverage may be incomplete."
+            if budget_warning not in research_warnings:
+                research_warnings.append(budget_warning)
+            if run_id:
+                publish_event(run_id, "research_warning", {"stage": "research", "message": budget_warning, "budget": usage})
 
     if run_id:
         try:
@@ -248,7 +299,8 @@ def research_node(state: RunState) -> Dict[str, Any]:
                     "title": s.get("title"),
                     "url": s.get("url"),
                     "domain": s.get("domain"),
-                    "authority_score": s.get("authority_score")
+                    "authority_score": s.get("authority_score"),
+                    "track_id": s.get("track_id"),
                 })
             publish_event(run_id, "evidence_extracted", {
                 "total_evidence_units": len(all_evidence),
@@ -277,6 +329,13 @@ def critic_node(state: RunState) -> Dict[str, Any]:
     _notify_stage(run_id, "critic", f"Adversarial Critic auditing {len(evidence)} sources (Round {current_round})...", 55)
 
     critic_audit = audit_research_evidence(query, plan, evidence, run_id=run_id)
+    warnings = list(state.get("warnings", []))
+    if critic_audit.get("status") == "unavailable":
+        warning = critic_audit.get("warning", "Evidence critique was unavailable.")
+        if warning not in warnings:
+            warnings.append(warning)
+        if run_id:
+            publish_event(run_id, "research_warning", {"stage": "critic", "message": warning})
 
     if run_id:
         try:
@@ -301,7 +360,8 @@ def critic_node(state: RunState) -> Dict[str, Any]:
     return {
         "critic_findings": critic_audit,
         "round": current_round,
-        "arbiter_queries": critic_audit.get("arbiter_queries", [])
+        "arbiter_queries": critic_audit.get("arbiter_queries", []),
+        "warnings": warnings,
     }
 
 
@@ -338,6 +398,7 @@ def arbiter_node(state: RunState) -> Dict[str, Any]:
         user_id=settings.get("user_id"),
         blocked_domains=settings.get("blocked_domains") or [],
         cancel_check=lambda: _is_cancelled(run_id),
+        budget=state.get("resource_budget"),
     )
 
     new_raw = evidence + arbiter_result.get("evidence", [])
@@ -461,35 +522,12 @@ def score_node(state: RunState) -> Dict[str, Any]:
 
     _notify_stage(run_id, "scoring", "Computing research quality, faithfulness, and coverage scores...", 97)
 
-    auth_vals = [float(e["authority_score"]) for e in evidence if e.get("authority_score") is not None]
     from engine.agents.claim_verifier import evaluate_track_relevance
     plan = state.get("plan", [])
     relevance_result = evaluate_track_relevance(plan, evidence, run_id=run_id)
-    relevancy_vals = [item["score"] for item in relevance_result.values() if item.get("score") is not None]
-    avg_relevancy = round(sum(relevancy_vals) / len(relevancy_vals), 2) if relevancy_vals else None
-
-    per_track_domains: Dict[str, set] = {str(track.get("id", "")): set() for track in plan}
-    for item in evidence:
-        domains = [item.get("domain")]
-        if item.get("source_type") == "user_doc":
-            domains = [f"document:{item.get('doc_name')}" ]
-        for track_id in item.get("track_ids") or ([str(item.get("track_id"))] if item.get("track_id") else []):
-            if track_id in per_track_domains and domains[0]:
-                per_track_domains[track_id].add(str(domains[0]).lower())
-    covered_tracks = [track_id for track_id, domains in per_track_domains.items() if len(domains) >= 2]
-    coverage_val = round(len(covered_tracks) / len(per_track_domains), 2) if per_track_domains else None
-
-    unique_domains = {str(e.get("domain")).lower() for e in evidence if e.get("domain") and e.get("source_type") != "user_doc"}
-    mean_authority = round(sum(auth_vals) / len(auth_vals), 2) if auth_vals else None
-    domain_diversity = round(min(1.0, len(unique_domains) / max(1, len(evidence))), 2) if evidence else None
-    authority_score = round(0.8 * mean_authority + 0.2 * domain_diversity, 2) if mean_authority is not None and domain_diversity is not None else mean_authority
-
-    scores = {
-        "faithfulness": guard.get("faithfulness_score"),
-        "relevancy": avg_relevancy,
-        "authority": authority_score,
-        "coverage": coverage_val
-    }
+    from engine.metrics import calculate_research_metrics
+    metric_result = calculate_research_metrics(plan, evidence, relevance_result, guard.get("faithfulness_score"))
+    scores = metric_result["scores"]
 
     if run_id:
         try:
@@ -503,11 +541,8 @@ def score_node(state: RunState) -> Dict[str, Any]:
                     "citation_validity": guard.get("citation_validity_score"),
                     "claims_audited": guard.get("claims_audited", 0),
                     "claims_supported": guard.get("claims_supported", 0),
-                    "track_relevancy": relevance_result,
-                    "track_domains": {key: sorted(value) for key, value in per_track_domains.items()},
-                    "covered_tracks": covered_tracks,
-                    "authority_mean": mean_authority,
-                    "domain_diversity": domain_diversity,
+                    **metric_result["details"],
+                    "research_budget": state.get("resource_budget").snapshot() if state.get("resource_budget") else None,
                 }
             )
         except Exception as e:
@@ -528,6 +563,19 @@ def finalize_node(state: RunState) -> Dict[str, Any]:
         return {}
 
     _notify_stage(run_id, "exporting", "Exporting dossier artifacts (Markdown, JSON, HTML)...", 99)
+    budget = state.get("resource_budget")
+    budget_usage = budget.snapshot() if budget else None
+    warnings = list(state.get("warnings", []))
+    if budget_usage and budget_usage.get("limits_reached"):
+        warning = "One or more configured run limits were reached; the report may have incomplete coverage."
+        if warning not in warnings:
+            warnings.append(warning)
+        if run_id:
+            publish_event(run_id, "research_warning", {
+                "stage": "finalization",
+                "message": warning,
+                "budget": budget_usage,
+            })
 
     export_paths = export_research_dossier(
         query=query,
@@ -537,22 +585,23 @@ def finalize_node(state: RunState) -> Dict[str, Any]:
         evidence_manifest=evidence,
         report_id=run_id,
         scores=state.get("scores", {}),
+        research_warnings=warnings,
+        budget_usage=budget_usage,
     )
 
     if run_id:
         try:
+            if budget_usage:
+                RelationalStore.update_research_budget(run_id, budget_usage)
             RelationalStore.save_report_and_claims(
                 run_id=run_id,
                 markdown=report_md,
                 guard_results=guard
             )
-            _notify_stage(run_id, "completed", "Investigation synthesized and verified.", 100)
-            publish_event(run_id, "run_completed", {
-                "report_id": run_id,
-                "executive_title": export_paths.get("executive_title", query),
-                "paths": export_paths
-            })
+            # The worker owns the terminal transition after it has validated
+            # the artifact and committed the durable session turn.
+            _notify_stage(run_id, "exporting", "Final report saved; confirming run status...", 99)
         except Exception as e:
             print(f"[graph.finalize_node] Relational finalize notice: {e}")
 
-    return {"export_paths": export_paths}
+    return {"export_paths": export_paths, "warnings": warnings}

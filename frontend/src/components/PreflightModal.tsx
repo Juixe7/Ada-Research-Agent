@@ -1,29 +1,30 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import React, { useState } from "react";
 import {
   FileText,
   Globe,
-  Sliders,
   ArrowRight,
   X,
   RefreshCw,
   Check,
   Compass
 } from "lucide-react";
+import type { ResearchBlueprint } from "@/lib/api-types";
 
 interface PreflightModalProps {
   isOpen: boolean;
   onClose: () => void;
   query: string;
-  blueprint: any;
+  blueprint: ResearchBlueprint | null;
   onConfirm: (calibratedParams: {
     clarificationChoice: string | null;
     customAngles: string[];
   }) => void;
   onSkip: () => void;
-  onRecalibrate: (modificationText: string) => Promise<void>;
+  onRecalibrate: (modificationText: string) => Promise<boolean>;
   recalibrating: boolean;
+  recalibrationError?: string;
 }
 
 export default function PreflightModal({
@@ -34,31 +35,18 @@ export default function PreflightModal({
   onConfirm,
   onSkip,
   onRecalibrate,
-  recalibrating
+  recalibrating,
+  recalibrationError = "",
 }: PreflightModalProps) {
-  const [selectedClarification, setSelectedClarification] = useState<string | null>(null);
+  const [selectedClarification, setSelectedClarification] = useState<string | null>(
+    blueprint?.clarification_options?.[0]?.id ?? null
+  );
   const [customClarification, setCustomClarification] = useState("");
   const [showCustomInput, setShowCustomInput] = useState(false);
-  const [activeAngles, setActiveAngles] = useState<string[]>([]);
+  const [activeAngles, setActiveAngles] = useState<string[]>(() =>
+    blueprint?.research_angles?.filter((angle) => angle.enabled !== false).map((angle) => angle.title) ?? []
+  );
   const [userPromptTweak, setUserPromptTweak] = useState("");
-
-  useEffect(() => {
-    if (blueprint) {
-      if (blueprint.clarification_options?.length > 0) {
-        setSelectedClarification(blueprint.clarification_options[0].id);
-      } else {
-        setSelectedClarification(null);
-      }
-
-      if (blueprint.research_angles?.length > 0) {
-        setActiveAngles(
-          blueprint.research_angles
-            .filter((a: any) => a.enabled !== false)
-            .map((a: any) => a.title)
-        );
-      }
-    }
-  }, [blueprint]);
 
   if (!isOpen || !blueprint) return null;
 
@@ -83,17 +71,19 @@ export default function PreflightModal({
     });
   };
 
-  const handleTweakSubmit = (e: React.FormEvent) => {
+  const handleTweakSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     if (!userPromptTweak.trim() || recalibrating) return;
-    onRecalibrate(userPromptTweak.trim());
-    setUserPromptTweak("");
+    const updated = await onRecalibrate(userPromptTweak.trim());
+    if (updated) setUserPromptTweak("");
   };
 
   const hasAmbiguity = Boolean(blueprint.ambiguity_detected);
   const sources = blueprint.ambiguity_sources || {};
+  const clarificationOptions = blueprint.clarification_options ?? [];
+  const researchAngles = blueprint.research_angles ?? [];
 
-  const formatScopeLabel = (scope: string) => {
+  const formatScopeLabel = (scope?: string) => {
     if (!scope) return "Web + Vault";
     const s = scope.toLowerCase();
     if (s.includes("combined") || s.includes("dual")) return "Web + Vault";
@@ -179,13 +169,13 @@ export default function PreflightModal({
               </div>
 
               {/* Clarification Choice Selector */}
-              {blueprint.clarification_options?.length > 0 && (
+              {clarificationOptions.length > 0 && (
                 <div className="space-y-2 pt-2 border-t border-[var(--line)]">
                   <span className="text-[11px] font-mono text-[var(--ink-3)] uppercase tracking-wider block font-semibold">
                     Choose primary direction:
                   </span>
                   <div className="space-y-1.5">
-                    {blueprint.clarification_options.map((opt: any) => (
+                    {clarificationOptions.map((opt) => (
                       <label
                         key={opt.id}
                         onClick={() => {
@@ -211,6 +201,28 @@ export default function PreflightModal({
                         </div>
                       </label>
                     ))}
+                    <button
+                      type="button"
+                      onClick={() => {
+                        setShowCustomInput((open) => !open);
+                        setSelectedClarification(null);
+                      }}
+                      className={`w-full p-3 rounded-xl border border-dashed text-left text-xs transition-colors ${
+                        showCustomInput ? "border-[var(--accent)] bg-[var(--surface-3)]" : "border-[var(--line)] hover:border-[var(--line-strong)]"
+                      }`}
+                    >
+                      Something else
+                    </button>
+                    {showCustomInput && (
+                      <input
+                        type="text"
+                        value={customClarification}
+                        onChange={(event) => setCustomClarification(event.target.value)}
+                        placeholder="Describe the direction you want to explore"
+                        aria-label="Custom research direction"
+                        className="w-full bg-[var(--surface-2)] border border-[var(--line)] focus:border-[var(--accent)] rounded-lg px-3.5 py-2.5 text-xs text-[var(--ink)] focus:outline-none"
+                      />
+                    )}
                   </div>
                 </div>
               )}
@@ -218,16 +230,16 @@ export default function PreflightModal({
           ) : null}
 
           {/* Research Angles */}
-          {blueprint.research_angles?.length > 0 && (
+          {researchAngles.length > 0 && (
             <div className="space-y-2.5">
               <div className="flex items-center justify-between">
                 <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold">
-                  Angles to Explore ({activeAngles.length} of {blueprint.research_angles.length} active)
+                  Angles to Explore ({activeAngles.length} of {researchAngles.length} active)
                 </span>
               </div>
 
               <div className="space-y-2">
-                {blueprint.research_angles.map((angle: any) => {
+                {researchAngles.map((angle) => {
                   const isChecked = activeAngles.includes(angle.title);
                   return (
                     <div
@@ -286,6 +298,11 @@ export default function PreflightModal({
                 )}
               </button>
             </div>
+            {recalibrationError && (
+              <p role="alert" className="text-xs text-[var(--bad)]">
+                {recalibrationError}
+              </p>
+            )}
           </form>
         </div>
 

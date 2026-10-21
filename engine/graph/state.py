@@ -32,3 +32,4 @@ class RunState(TypedDict):
     scores: Optional[Dict[str, Any]]
     export_paths: Optional[Dict[str, Any]]
     warnings: List[str]
+    resource_budget: Optional[Any]

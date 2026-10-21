@@ -30,80 +30,81 @@ const PIPELINE_NODES: PipelineNode[] = [
   {
     id: "planner",
     name: "01. Lead Planner Agent",
-    role: "Orthogonal DAG Query Decomposition",
-    modelOrTech: "Gemini 1.5/2.5 Flash • Structured JSON",
-    description: "Analyzes the user's research hypothesis and decomposes it into 3 to 7 orthogonal, non-overlapping investigation sub-questions. Formulates precise search queries targeting fundamental axioms rather than superficial keywords.",
-    inputs: ["Raw Research Hypothesis", "Depth Level (Quick vs Deep)", "Domain Filter"],
-    outputs: ["Sub-question DAG array", "Targeted search query matrix", "Investigation categories"],
-    resiliency: "Regex-based trailing comma repair and automatic exponential backoff to handle free-tier API throttling.",
-    codeSnippet: `def generate_research_plan(query: str, depth: str = "deep") -> List[Dict[str, Any]]:
-    # Decomposes hypothesis into orthogonal research tracks
-    prompt = f"Decompose into orthogonal research tracks: {query}"
-    response = call_gemini_with_backoff(prompt)
-    return parse_json_safely(response)`
+    role: "Research track and search-query planning",
+    modelOrTech: "Small model group • research-plan generation",
+    description: "Turns the research question, depth, and approved scope into a set of focused research tracks and search queries. The number of tracks follows the selected depth or the user's chosen research angles.",
+    inputs: ["Research question", "Depth (quick, standard, or deep)", "Clarification and selected angles"],
+    outputs: ["Research tracks", "Targeted search queries", "Track categories"],
+    resiliency: "Uses the shared LLM gateway with configured provider fallback and budgets. If the model response cannot be parsed, a deterministic heuristic plan is returned.",
+    codeSnippet: `plan = generate_research_plan(
+    query=query,
+    depth=depth,
+    custom_angles=custom_angles,
+    clarification_context=clarification,
+    run_id=run_id,
+)`
   },
   {
     id: "retrieval",
-    name: "02. Dual-Corpus Ingestion Workers",
+    name: "02. Parallel Web & Vault Retrieval",
     role: "Parallel Web & Private Document Retrieval",
-    modelOrTech: "Trafilatura + Jina Reader + Qdrant ONNX",
-    description: "Fans out sub-tasks concurrently across parallel threads or Celery chords. Simultaneously scrapes live web articles using a 3-tier fallback and retrieves private PDF passages from local Qdrant vector memory.",
-    inputs: ["Search queries per track", "Qdrant collection 'ada_documents'", "Private doc flag"],
-    outputs: ["Extracted full-text web articles", "Page-indexed PDF chunks", "Authority scores"],
-    resiliency: "3-tier scraper: Trafilatura direct -> Jina Reader (r.jina.ai headless markdown) -> Serper snippet. Bypasses Cloudflare bot blocks.",
-    codeSnippet: `def scrape_page_content(url: str) -> str:
-    # Tier 1: Fast direct extraction via Trafilatura
-    text = trafilatura.extract(fetch_url(url))
-    if text and len(text) > 200: return text
-    # Tier 2: Headless proxy via r.jina.ai (bypasses bot-walls)
-    return fetch_jina_reader(url)`
+    modelOrTech: "Search providers • safe page fetch • Qdrant",
+    description: "Runs planned research tracks concurrently. Each track searches the public web and, when selected, retrieves passages from the signed-in user's private document collection.",
+    inputs: ["Search queries per track", "Selected document names", "Authenticated user scope"],
+    outputs: ["Retrieved web evidence", "Page-aware private passages", "Track warnings and source metadata"],
+    resiliency: "Public page fetches validate URLs and redirects, enforce a response-size and time limit, and preserve search snippets when full-page extraction fails.",
+    codeSnippet: `evidence = execute_iterative_sub_research(
+    track=track,
+    selected_docs=selected_docs,
+    user_id=user_id,
+    cancel_check=cancel_check,
+)`
   },
   {
     id: "manifest",
     name: "03. Evidence Normalizer & Deduplicator",
     role: "Deterministic Citation Standardization",
     modelOrTech: "Canonical Hash & URI Normalization",
-    description: "Aggregates evidence across all parallel workers, removes duplicate URLs and snippets, strips tracking parameters, and assigns deterministic, permanent citation IDs ([S1], [S2] for web; [D1], [D2] for private documents).",
+    description: "Merges duplicate evidence from parallel tracks, canonicalizes web URLs, groups repeated track references, and assigns stable source IDs for the report and evidence inspector.",
     inputs: ["Raw multi-worker evidence arrays"],
     outputs: ["Unified Evidence Manifest", "Unique Citation Index", "Passage excerpts"],
-    resiliency: "URL query strip normalization prevents duplicate scraping of identical web pages with different UTM tags.",
-    codeSnippet: `def normalize_and_deduplicate_evidence(raw_list):
-    # D1, D2 for user docs; S1, S2 for web sources
-    clean_list = []
-    for item in raw_list:
-        key = make_canonical_key(item)
-        if key not in seen:
-            item["source_id"] = f"S{idx}"
-            clean_list.append(item)`
+    resiliency: "Canonical URL and content-based keys remove common duplicates while retaining the tracks that found each source. Private document passages remain distinct evidence units.",
+    codeSnippet: `evidence_manifest = normalize_and_deduplicate_evidence(
+    raw_results
+)`
   },
   {
     id: "critic",
     name: "04. Adversarial Critic & Auditor",
     role: "Knowledge Gap & Contradiction Detection",
     modelOrTech: "Adversarial Prompting • Coverage Scoring",
-    description: "Reviews the aggregated evidence manifest against the original query to identify missing data, uncorroborated assertions, and direct factual contradictions across sources. Generates dynamic Arbiter queries to resolve conflicts.",
+    description: "Reviews a bounded evidence summary against the question and research tracks, looking for gaps and conflicting claims. The graph can run a targeted arbiter search when the critic returns follow-up queries.",
     inputs: ["Unified Evidence Manifest", "Original Research Plan"],
-    outputs: ["Coverage Quality & Score (0-100)", "Identified Gaps list", "Contradictions Matrix", "Arbiter Queries"],
-    resiliency: "If coverage score is low or contradictions exceed threshold, dynamically dispatches an Arbiter research task before synthesis.",
-    codeSnippet: `def audit_research_evidence(query, plan, evidence):
-    prompt = f"Audit evidence for gaps and direct contradictions: {evidence}"
-    audit = call_critic_llm(prompt)
-    if audit.get("contradictions"):
-        dispatch_arbiter_task(audit["arbiter_queries"])`
+    outputs: ["Coverage assessment", "Identified gaps", "Contradictions", "Optional arbiter queries"],
+    resiliency: "If the critic call is unavailable, the system records that the audit is unavailable and does not fabricate gaps or contradictions.",
+    codeSnippet: `audit = audit_research_evidence(
+    query=query,
+    sub_tasks=plan,
+    evidence_manifest=evidence,
+    run_id=run_id,
+)`
   },
   {
     id: "synthesizer",
     name: "05. Chief Research Synthesizer",
-    role: "Long-Context Monograph Generation",
-    modelOrTech: "Gemini 1.5/3.8 Flash (1M Context) + Groq Failover",
-    description: "Injects all scraped sources and arbitrated viewpoints into Gemini's 1-million-token context window. Produces a 2,000+ word publication-grade research dossier organized into 6 standardized intelligence sections.",
-    inputs: ["Full Evidence Manifest (up to 1M tokens)", "Critic Audit & Arbitrations"],
-    outputs: ["2,000+ word structured markdown monograph with [S#]/[D#] inline citations"],
-    resiliency: "Strict XML boundary isolation. Automatic 429 rate limit backoff (up to 20s) with seamless failover to Groq (qwen/qwen-2.5-72b).",
-    codeSnippet: `def synthesize_research_dossier(query, evidence, critic_audit):
-    # Pack up to 1M context with XML fencing
-    payload = build_evidence_context(evidence)
-    return call_gemini_with_fallback(payload)`
+    role: "Evidence-led, section-based report synthesis",
+    modelOrTech: "Write model group • structured report sections",
+    description: "Builds a report outline from the evidence and critic findings, synthesizes sections, assembles the report, and sends cited claims for verification. Output length depends on the evidence and research depth.",
+    inputs: ["Retrieved evidence manifest", "Critic findings and optional arbiter results"],
+    outputs: ["Structured research report", "Claim-level verification results"],
+    resiliency: "Uses the configured write-model primary and fallback through the shared gateway. When synthesis is unavailable, the system preserves collected evidence and reports the failure instead of inventing findings.",
+    codeSnippet: `outline = generate_outline(query, plan, evidence, critic)
+section_drafts = {}
+for section in outline:
+    section_drafts[section["id"]] = synthesize_section(
+        section, query, evidence_by_id, run_id=run_id
+    )
+report = assemble_final_dossier(query, section_drafts, outline, evidence, run_id)`
   },
   {
     id: "citations",
@@ -112,7 +113,7 @@ const PIPELINE_NODES: PipelineNode[] = [
     modelOrTech: "Regex + Retrieved Evidence Manifest",
     description: "Checks that [S#] and [D#] citation IDs exist in the retrieved evidence manifest. It removes lines supported only by unknown IDs and reports reference validity; it does not evaluate claim entailment.",
     inputs: ["Draft Monograph", "Retrieved Evidence Manifest"],
-    outputs: ["Citation Index", "Unmatched Citation IDs", "Cleaned Monograph"],
+    outputs: ["Citation index", "Claim-level verdicts", "Cleaned report and validity metrics"],
     resiliency: "Runs deterministically without an external model. Citation presence is not treated as proof that a source supports a claim.",
     codeSnippet: `def verify_and_ground_citations(report_markdown, evidence_manifest):
     # Resolve citation IDs against retrieved source IDs
@@ -174,11 +175,11 @@ export default function ArchitecturePage() {
               </div>
               <div className="flex items-center gap-1.5 bg-[var(--surface-2)] px-3 py-1.5 rounded-[6px] border border-[var(--line)]">
                 <Globe className="w-3.5 h-3.5 text-[var(--accent)]" />
-                <span>Trafilatura + Jina Fallback</span>
+                <span>Trafilatura + search-snippet fallback</span>
               </div>
               <div className="flex items-center gap-1.5 bg-[var(--surface-2)] px-3 py-1.5 rounded-[6px] border border-[var(--line)]">
                 <Zap className="w-3.5 h-3.5 text-[var(--accent)]" />
-                <span>Groq 429 Failover to Gemini</span>
+                <span>Configured LLM provider fallbacks</span>
               </div>
             </div>
           </div>
@@ -323,7 +324,7 @@ export default function ArchitecturePage() {
               <div className="flex items-center justify-between text-[11px] font-mono text-[var(--ink-3)]">
                 <span className="flex items-center gap-1.5">
                   <Code className="w-3.5 h-3.5 text-[var(--ink-2)]" />
-                  Implementation Reference
+                  Representative Execution Flow
                 </span>
                 <span className="text-[var(--ink-4)]">engine/</span>
               </div>

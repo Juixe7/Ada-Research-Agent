@@ -1,5 +1,6 @@
 import sys
 from pathlib import Path
+import pytest
 
 # Add project root to path
 ROOT = Path(__file__).resolve().parent.parent
@@ -7,6 +8,7 @@ sys.path.insert(0, str(ROOT))
 
 from engine.tasks import run_research_pipeline_sync
 
+@pytest.mark.integration
 def test_phase2_critic_and_arbiter():
     test_query = "Commercialization timeline of solid-state batteries in electric vehicles vs LFP by 2026"
 
@@ -40,7 +42,11 @@ def test_phase2_critic_and_arbiter():
     print(f"\nTotal Final Evidence Units in Manifest: {pipeline_res.get('total_evidence_units')}")
 
     # Assertions
-    assert audit.get("coverage_score") is not None, "Missing critic coverage score"
+    if audit.get("status") == "unavailable":
+        assert audit.get("coverage_score") is None
+        assert audit.get("identified_gaps") == []
+    else:
+        assert audit.get("coverage_score") is not None, "Missing critic coverage score"
     assert pipeline_res.get("total_evidence_units") > 0, "No evidence in manifest"
     assert "critic_audit" in pipeline_res, "Pipeline result missing critic audit"
 

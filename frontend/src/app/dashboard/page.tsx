@@ -23,15 +23,31 @@ interface VaultItem {
   chunk_count?: number;
 }
 
+interface DashboardWorkspaceState {
+  token: string;
+  sessions: SessionItem[];
+  vaultDocs: VaultItem[];
+  loading: boolean;
+  error: boolean;
+}
+
 export default function UserDashboardPage() {
   const { user, token, loading: authLoading } = useAuth();
   const router = useRouter();
 
   const [launcherQuery, setLauncherQuery] = useState("");
-  const [sessions, setSessions] = useState<SessionItem[]>([]);
-  const [vaultDocs, setVaultDocs] = useState<VaultItem[]>([]);
-  const [dataLoading, setDataLoading] = useState(true);
-  const [dataError, setDataError] = useState(false);
+  const [workspace, setWorkspace] = useState<DashboardWorkspaceState | null>(null);
+  const hasCurrentWorkspace = Boolean(token && workspace?.token === token);
+  const sessions = useMemo(
+    () => hasCurrentWorkspace ? workspace?.sessions ?? [] : [],
+    [hasCurrentWorkspace, workspace],
+  );
+  const vaultDocs = useMemo(
+    () => hasCurrentWorkspace ? workspace?.vaultDocs ?? [] : [],
+    [hasCurrentWorkspace, workspace],
+  );
+  const dataLoading = Boolean(token) && (!hasCurrentWorkspace || workspace?.loading === true);
+  const dataError = hasCurrentWorkspace && workspace?.error === true;
 
   // Guard: redirect to login if unauthenticated
   useEffect(() => {
@@ -44,27 +60,36 @@ export default function UserDashboardPage() {
   useEffect(() => {
     if (!token) return;
 
+    const controller = new AbortController();
     const headers = { Authorization: `Bearer ${token}` };
 
     Promise.all([
-      fetch(`${API_URL}/api/sessions`, { headers }).then(r => {
+      fetch(`${API_URL}/api/sessions`, { headers, signal: controller.signal }).then(r => {
         if (!r.ok) throw new Error("Could not load research conversations");
         return r.json();
       }),
-      fetch(`${API_URL}/api/vault`, { headers }).then(r => {
+      fetch(`${API_URL}/api/vault`, { headers, signal: controller.signal }).then(r => {
         if (!r.ok) throw new Error("Could not load the source library");
         return r.json();
       })
     ])
       .then(([sessData, vaultData]) => {
-        setSessions(sessData.sessions || []);
-        setVaultDocs(vaultData.documents || []);
+        if (controller.signal.aborted) return;
+        setWorkspace({
+          token,
+          sessions: sessData.sessions || [],
+          vaultDocs: vaultData.documents || [],
+          loading: false,
+          error: false,
+        });
       })
       .catch((err) => {
+        if (controller.signal.aborted) return;
         console.warn("Dashboard fetch warning:", err);
-        setDataError(true);
-      })
-      .finally(() => setDataLoading(false));
+        setWorkspace({ token, sessions: [], vaultDocs: [], loading: false, error: true });
+      });
+
+    return () => controller.abort();
   }, [token]);
 
   const handleLaunchSearch = (e: React.FormEvent) => {
@@ -94,10 +119,6 @@ export default function UserDashboardPage() {
   const totalPassages = useMemo(() => {
     return vaultDocs.reduce((acc, d) => acc + (d.chunk_count || 0), 0);
   }, [vaultDocs]);
-
-  const totalTurns = useMemo(() => {
-    return sessions.reduce((acc, s) => acc + (s.turn_count || 0), 0);
-  }, [sessions]);
 
   if (authLoading || !user) {
     return (

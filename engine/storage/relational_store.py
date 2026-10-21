@@ -176,7 +176,7 @@ class RelationalStore:
                 kind = ev.get("source_type", "web")
                 track_keys = ev.get("track_ids") or ([str(ev.get("track_id"))] if ev.get("track_id") else [])
                 db_track_id = next((track_ids[key] for key in track_keys if key in track_ids), None)
-                canonical_url = ev.get("url") or ev.get("doc_name") or f"src_{idx}"
+                canonical_url = ev.get("canonical_url") or ev.get("url") or ev.get("doc_name") or f"src_{idx}"
 
                 # Deduplicate sources per run
                 source = None
@@ -193,9 +193,10 @@ class RelationalStore:
                         kind=kind,
                         url=ev.get("url"),
                         canonical_url=canonical_url,
+                        content_hash=ev.get("content_hash"),
                         title=ev.get("title") or ev.get("doc_name") or "Source",
                         domain=ev.get("domain") or ("vault" if kind == "user_doc" else "web"),
-                        published_at=ev.get("date"),
+                        published_at=ev.get("published_date") or ev.get("date"),
                         authority_tier=ev.get("authority_score"),
                         tag=raw_tag,
                         track_id=db_track_id,
@@ -207,15 +208,17 @@ class RelationalStore:
                 source_tag_to_id[raw_tag] = source.id
 
                 # Create evidence record
-                quote_text = ev.get("text", "")[:4000]
+                quote_text = ev.get("quote") or ev.get("text", "")[:600]
                 evidence_record = Evidence(
                     id=str(uuid.uuid4()),
                     run_id=run_id,
                     source_id=source.id,
-                    claim=ev.get("title", ""),
+                    claim=ev.get("claim"),
                     track_id=db_track_id,
                     quote=quote_text,
-                    location=f"Page {ev.get('page_number')}" if ev.get("page_number") else ev.get("url"),
+                    location=ev.get("location") or (
+                        f"Page {ev.get('page_number')}" if ev.get("page_number") else ev.get("url")
+                    ),
                     values=ev.get("values", {}),
                     relevance=ev.get("relevance_score", 0.8),
                     final_score=ev.get("authority_score")
@@ -242,7 +245,7 @@ class RelationalStore:
                     description=f"Topic: {c.get('topic')}. Viewpoint A: {c.get('claim_a')} vs Viewpoint B: {c.get('claim_b')}",
                     evidence_ids=[c.get("source_a", ""), c.get("source_b", "")],
                     status="resolved" if c.get("resolution") else "open",
-                    resolution_note=c.get("analysis") or c.get("resolution"),
+                    resolution_note=c.get("resolution"),
                     followup=critic_audit.get("arbiter_queries", []),
                     round=1
                 )
@@ -256,7 +259,7 @@ class RelationalStore:
                     run_id=run_id,
                     type="gap",
                     description=g,
-                    status="resolved",
+                    status="open",
                     round=1
                 )
                 db.add(finding)
@@ -294,6 +297,11 @@ class RelationalStore:
             # explicitly unverified for inspection instead of dropping them.
             claim_items = list((guard_results or {}).get("claims", []))
             if not claim_items:
+                rejected_claims = {
+                    " ".join(str(claim).split())
+                    for claim in ((guard_results or {}).get("rejected_claims") or [])
+                    if isinstance(claim, str)
+                }
                 for line in markdown.splitlines():
                     stripped = line.strip()
                     if not stripped or stripped.startswith(("#", "|", "- [", "* [")):
@@ -301,11 +309,17 @@ class RelationalStore:
                     for sentence in re.split(r"(?<=[.!?])\s+", stripped):
                         tags = re.findall(r"\[((?:S|D)\d+)\]", sentence)
                         if tags:
+                            normalized_sentence = " ".join(sentence.split())
+                            is_rejected = normalized_sentence in rejected_claims
                             claim_items.append({
                                 "sentence": sentence.strip(),
                                 "tags": list(dict.fromkeys(tags)),
-                                "verdict": "unverified",
-                                "reason": "This report was saved without a claim-entailment audit.",
+                                "verdict": "flagged" if is_rejected else "unverified",
+                                "reason": (
+                                    "The citation guard rejected this claim."
+                                    if is_rejected
+                                    else "This report was saved without a claim-entailment audit."
+                                ),
                             })
 
             for item in claim_items:
@@ -351,6 +365,22 @@ class RelationalStore:
             db.commit()
             db.refresh(score)
             return score
+        finally:
+            db.close()
+
+    @classmethod
+    def update_research_budget(cls, run_id: str, budget_usage: Dict[str, Any]) -> bool:
+        """Persist final run-budget counters without replacing score details."""
+        db = cls.get_session()
+        try:
+            score = db.query(Score).filter(Score.run_id == run_id).first()
+            if not score:
+                return False
+            details = dict(score.details or {})
+            details["research_budget"] = budget_usage
+            score.details = details
+            db.commit()
+            return True
         finally:
             db.close()
 
@@ -558,12 +588,17 @@ class RelationalStore:
             sources_list = [
                 {
                     "source_id": s.tag,
-                    "kind": s.kind,
+                    "kind": "doc" if s.kind in {"doc", "user_doc"} else "web",
                     "title": s.title,
                     "url": s.url,
+                    "canonical_url": s.canonical_url,
                     "domain": s.domain,
                     "authority_tier": s.authority_tier,
-                    "published_at": s.published_at
+                    "published_at": s.published_at,
+                    "snippet": next((item.quote for item in sorted(
+                        s.evidence, key=lambda item: item.final_score or 0, reverse=True
+                    ) if item.quote), None),
+                    "location": next((item.location for item in s.evidence if item.location), None),
                 }
                 for s in sources
             ]
@@ -648,6 +683,7 @@ class RelationalStore:
                     "coverage": score.coverage,
                     "citation_validity": (score.details or {}).get("citation_validity"),
                 } if score else None,
+                "budget_usage": (score.details or {}).get("research_budget") if score else None,
                 "citation_validity_score": (score.details or {}).get("citation_validity") if score else None,
                 "sources_count": len(sources),
                 "sources": sources_list,

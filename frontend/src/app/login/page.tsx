@@ -80,6 +80,7 @@ export default function LoginPage() {
                   type="text"
                   autoFocus
                   required
+                  autoComplete="username"
                   value={loginId}
                   onChange={(e) => setLoginId(e.target.value)}
                   placeholder="name@organization.com or username"
@@ -102,6 +103,7 @@ export default function LoginPage() {
                 <input
                   type="password"
                   required
+                  autoComplete="current-password"
                   value={password}
                   onChange={(e) => setPassword(e.target.value)}
                   placeholder="••••••••••••"

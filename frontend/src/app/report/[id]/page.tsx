@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, use, useMemo } from "react";
+import React, { useState, useEffect, useRef, use, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
 import ReactMarkdown from "react-markdown";
@@ -8,34 +8,22 @@ import remarkGfm from "remark-gfm";
 import {
   ArrowLeft, Check, Copy, ExternalLink, Printer,
   ShieldCheck, AlertTriangle, X, ChevronRight, Share2,
-  Database, Activity, FileText, CornerDownRight, MessageSquare,
-  CheckCircle2, ChevronDown, Plus, Download, Sliders
+  CheckCircle2
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import RunInspectorDrawer from "@/components/RunInspectorDrawer";
 import { API_URL, formatDossierDate } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
-
-function headingText(node: any): string {
-  if (node == null || typeof node === "boolean") return "";
-  if (typeof node === "string" || typeof node === "number") return String(node);
-  if (Array.isArray(node)) return node.map(headingText).join("");
-  if (React.isValidElement(node)) return headingText((node.props as any).children);
-  return "";
-}
-
-function headingSlug(value: string): string {
-  return value.toLowerCase().trim().replace(/[^a-z0-9]+/g, "-").replace(/^-|-$/g, "") || "section";
-}
-
-function sourceDomain(url?: string | null): string {
-  if (!url) return "vault";
-  try {
-    return new URL(url).hostname;
-  } catch {
-    return "external source";
-  }
-}
+import { useReportFollowups } from "@/hooks/useReportFollowups";
+import {
+  buildCitationMap,
+  buildReportChapters,
+  buildReportSources,
+  getReportWarnings,
+  headingSlug,
+  headingText,
+} from "@/lib/report-content";
+import type { CitationDetails, ReportData } from "@/lib/report-types";
 
 export default function ReportReaderPage({
   params,
@@ -48,7 +36,7 @@ export default function ReportReaderPage({
   const { token, loading: authLoading } = useAuth();
 
   // Core Data
-  const [report, setReport] = useState<any>(null);
+  const [report, setReport] = useState<ReportData | null>(null);
   const [loading, setLoading] = useState(true);
   const [status, setStatus] = useState<string>("loading");
   const [copied, setCopied] = useState(false);
@@ -62,23 +50,37 @@ export default function ReportReaderPage({
   const [activeSectionId, setActiveSectionId] = useState<string>("");
 
   // Screen 7.8 Evidence Inspector & Claim Overlay
-  const [selectedCitation, setSelectedCitation] = useState<any>(null);
+  const [selectedCitation, setSelectedCitation] = useState<CitationDetails | null>(null);
   const [inspectorOpen, setInspectorOpen] = useState(false);
   const [runInspectorOpen, setRunInspectorOpen] = useState(false);
 
-  // Screen 7.5 Follow-up Panel
-  const [followupQuery, setFollowupQuery] = useState("");
-  const [followupLoading, setFollowupLoading] = useState(false);
-  const [followupThreads, setFollowupThreads] = useState<any[]>([]);
-  const [selectedFollowupText, setSelectedFollowupText] = useState("");
   const followupInputRef = useRef<HTMLInputElement>(null);
 
   // Selection Floating Menu
   const [floatingSelection, setFloatingSelection] = useState<{ text: string; x: number; y: number } | null>(null);
 
-  const showToast = (msg: string) => {
+  const showToast = useCallback((msg: string) => {
     setToastMsg(msg);
     setTimeout(() => setToastMsg(null), 3000);
+  }, []);
+
+  const {
+    query: followupQuery,
+    setQuery: setFollowupQuery,
+    loading: followupLoading,
+    threads: followupThreads,
+    selectedText: selectedFollowupText,
+    setSelectedText: setSelectedFollowupText,
+    submit: submitFollowup,
+  } = useReportFollowups(reportId, token, showToast);
+
+  const navigateToSection = (event: React.MouseEvent<HTMLAnchorElement>, sectionId: string) => {
+    const target = document.getElementById(sectionId);
+    if (!target) return;
+    event.preventDefault();
+    window.history.replaceState(null, "", `#${encodeURIComponent(sectionId)}`);
+    target.scrollIntoView({ behavior: window.matchMedia("(prefers-reduced-motion: reduce)").matches ? "instant" : "smooth", block: "start" });
+    setActiveSectionId(sectionId);
   };
 
   // Reading progress tracking & Scroll-spy
@@ -109,13 +111,17 @@ export default function ReportReaderPage({
   // Fetch report data
   useEffect(() => {
     if (authLoading) return;
+    const controller = new AbortController();
     const headers: Record<string, string> = {};
     if (token) headers["Authorization"] = `Bearer ${token}`;
 
-    fetch(`${API_URL}/api/v1/runs/${reportId}/report`, { headers })
+    fetch(`${API_URL}/api/v1/runs/${reportId}/report`, { headers, signal: controller.signal })
       .then(async (res) => {
         if (res.ok) return res.json();
-        const fallback = await fetch(`${API_URL}/api/report/status/${reportId}`, { headers });
+        const fallback = await fetch(`${API_URL}/api/report/status/${reportId}`, {
+          headers,
+          signal: controller.signal,
+        });
         if (!fallback.ok) throw new Error("Research dossier not found or access denied.");
         const data = await fallback.json();
         if (data.status !== "completed") {
@@ -135,14 +141,19 @@ export default function ReportReaderPage({
           setStatus("not_found");
           return;
         }
-        setReport(data);
+        setReport(data as ReportData);
         setStatus("completed");
       })
       .catch((err) => {
+        if (controller.signal.aborted) return;
         console.warn("Report fetch warning:", err);
         setStatus("not_found");
       })
-      .finally(() => setLoading(false));
+      .finally(() => {
+        if (!controller.signal.aborted) setLoading(false);
+      });
+
+    return () => controller.abort();
   }, [authLoading, reportId, token, router]);
 
   // Handle text selection for "Ask about this" floating action
@@ -169,76 +180,37 @@ export default function ReportReaderPage({
     return () => document.removeEventListener("mouseup", handleMouseUp);
   }, []);
 
-  // Citation Index Mapping
-  const citationMap = useMemo(() => {
-    const map = new Map<string, any>();
-    if (!report) return map;
-
-    // Check evidence manifest
-    if (report.evidence_manifest) {
-      report.evidence_manifest.forEach((ev: any) => {
-        const id = ev.source_id || ev.id;
-        map.set(id, {
-          id,
-          title: ev.title || ev.doc_name || "Primary source",
-          url: ev.url,
-          domain: ev.domain || sourceDomain(ev.url),
-          doc_name: ev.doc_name,
-          snippet: ev.text || ev.quote || ev.snippet,
-          authority: ev.authority_score != null ? ev.authority_score * 5 : null,
-          kind: ev.doc_name ? "doc" : "web",
-          verdict: "reference_found",
-          reason: "Citation ID resolves to a retrieved passage; claim entailment was not evaluated",
-        });
-      });
-    }
-
-    // Check sources list from relational store
-    if (report.sources) {
-      report.sources.forEach((s: any) => {
-        const id = s.source_id || s.id;
-        if (!map.has(id)) {
-          map.set(id, {
-            id,
-            title: s.title || s.domain,
-            url: s.url,
-            domain: s.domain,
-            authority: s.authority_tier != null ? s.authority_tier * 5 : null,
-            kind: s.kind === "user_doc" || s.kind === "doc" ? "doc" : "web",
-            snippet: s.snippet || "",
-            verdict: "reference_found",
-          });
-        }
-      });
-    }
-
-    return map;
-  }, [report]);
-
-  // Chapters for Left Table of Contents
-  const chapters = useMemo(() => {
-    const md = report?.monograph || report?.report_markdown || "";
-    if (!md) return [];
-    const lines = md.split("\n");
-    const result: { id: string; title: string }[] = [];
-
-    const seen: Record<string, number> = {};
-    lines.forEach((line: string) => {
-      if (line.startsWith("## ")) {
-        const title = line.replace(/^##\s+/, "").replace(/[`*_~]/g, "").replace(/\[([^\]]+)\]\([^)]+\)/g, "$1").trim();
-        const base = headingSlug(title);
-        const occurrence = seen[base] || 0;
-        seen[base] = occurrence + 1;
-        const id = occurrence ? `${base}-${occurrence + 1}` : base;
-        result.push({ id, title });
-      }
+  // Report transformations stay pure so section navigation and citation lookup
+  // use the same rules in the UI.
+  const citationMap = useMemo(() => buildCitationMap(report), [report]);
+  const reportSources = useMemo(() => buildReportSources(report), [report]);
+  const chapters = useMemo(
+    () => buildReportChapters(report?.monograph || report?.report_markdown || ""),
+    [report],
+  );
+  // ReactMarkdown's heading renderer may be invoked more than once in development.
+  // Reconcile rendered IDs to the same deterministic list used by the contents links.
+  useEffect(() => {
+    if (!report) return;
+    const headings = Array.from(document.querySelectorAll<HTMLElement>(".monograph-prose h2"));
+    headings.forEach((heading, index) => {
+      const chapter = chapters[index];
+      if (chapter) heading.id = chapter.id;
     });
 
-    if (result.length === 0) {
-      result.push({ id: "overview", title: "Executive Intelligence Briefing" });
-    }
-    return result;
-  }, [report]);
+    if (!window.location.hash) return;
+    const sectionId = decodeURIComponent(window.location.hash.slice(1));
+    const frame = window.requestAnimationFrame(() => {
+      const target = document.getElementById(sectionId);
+      if (!target) return;
+      target.scrollIntoView({ block: "start" });
+      setActiveSectionId(sectionId);
+    });
+    return () => window.cancelAnimationFrame(frame);
+  }, [report, chapters]);
+  const sourcesChapter = chapters.find(({ title }) =>
+    /^(?:evidence\s+sources|primary\s+sources|sources?\s*(?:&|and)\s*citations?|bibliography)\b/i.test(title)
+  );
 
   const handleCitationClick = (citationTag: string) => {
     const cleanTag = citationTag.replace(/[\[\]]/g, "");
@@ -249,6 +221,7 @@ export default function ReportReaderPage({
       authority: null,
       snippet: "",
       verdict: "unresolved",
+      kind: "web" as const,
     };
     setSelectedCitation(src);
     setInspectorOpen(true);
@@ -274,7 +247,7 @@ export default function ReportReaderPage({
         });
         const data = await response.json().catch(() => ({}));
         if (!response.ok) throw new Error(data.detail || "Could not enable public sharing.");
-        setReport((current: any) => current ? { ...current, is_public: data.is_public } : current);
+        setReport((current) => current ? { ...current, is_public: Boolean(data.is_public) } : current);
       }
       await navigator.clipboard.writeText(window.location.href);
       showToast(report?.is_public ? "Public dossier link copied." : "Public sharing enabled. Link copied.");
@@ -285,52 +258,9 @@ export default function ReportReaderPage({
     }
   };
 
-  // Follow-up Inquiry Submission (Screen 7.5)
   const handleFollowupSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
-    if (!followupQuery.trim() || followupLoading) return;
-
-    const q = followupQuery.trim();
-    setFollowupLoading(true);
-
-    try {
-      const res = await fetch(`${API_URL}/api/report/${reportId}/query-evidence`, {
-        method: "POST",
-        headers: {
-          "Content-Type": "application/json",
-          ...(token ? { Authorization: `Bearer ${token}` } : {}),
-        },
-        body: JSON.stringify({ question: q, selected_text: selectedFollowupText }),
-      });
-
-      if (!res.ok) {
-        const details = await res.json().catch(() => ({}));
-        throw new Error(details.detail || "Unable to answer from this report's evidence.");
-      }
-
-      const data = await res.json();
-      setFollowupThreads((prev) => [
-        ...prev,
-        {
-          id: Date.now(),
-          question: q,
-          answer: data.answer,
-          path: data.verification_status === "verified"
-            ? "Checked against report evidence"
-            : data.status === "insufficient_evidence"
-              ? "No supporting report evidence"
-              : "Citations checked · entailment uncertain",
-          citations: data.citations || [],
-          verificationStatus: data.verification_status,
-        },
-      ]);
-      setFollowupQuery("");
-      setSelectedFollowupText("");
-    } catch (err) {
-      showToast(err instanceof Error ? err.message : "Follow-up investigation failed.");
-    } finally {
-      setFollowupLoading(false);
-    }
+    await submitFollowup();
   };
 
   if (loading) {
@@ -365,7 +295,6 @@ export default function ReportReaderPage({
   const depth = report.depth || "standard";
   const dateStr = formatDossierDate(report.created_at);
   const sourcesCount = report.sources?.length || report.evidence_manifest?.length || 0;
-  const renderedHeadingCounts = new Map<string, number>();
 
   // Scores - authentically loaded from report telemetry or null if not yet evaluated
   const scores = report.scores || (report.faithfulness_score !== undefined || report.coverage_score !== undefined ? {
@@ -375,17 +304,7 @@ export default function ReportReaderPage({
     coverage: report.coverage_score != null ? report.coverage_score / 100 : null,
   } : null);
   const citationValidity = report.citation_validity_score ?? report.guard_results?.citation_validity_score ?? null;
-  const runWarnings = [
-    ...(Array.isArray(report.research_warnings) ? report.research_warnings : []),
-    ...(Array.isArray(report.provider_warnings) ? report.provider_warnings : []),
-  ].map((warning: unknown) => {
-    if (typeof warning === "string") return warning;
-    if (warning && typeof warning === "object") {
-      const item = warning as Record<string, unknown>;
-      return String(item.message || item.detail || "A research service was unavailable.");
-    }
-    return "A research service was unavailable.";
-  });
+  const runWarnings = getReportWarnings(report);
 
   // Text size class mapping
   const textSizeClasses = {
@@ -536,7 +455,10 @@ export default function ReportReaderPage({
                 <a
                   key={ch.id}
                   href={`#${ch.id}`}
-                  className={`block py-1 pl-2.5 transition-all truncate text-xs ${
+                  onClick={(event) => navigateToSection(event, ch.id)}
+                  aria-current={isActive ? "location" : undefined}
+                  title={`Go to ${ch.title}`}
+                  className={`block cursor-pointer py-1 pl-2.5 transition-all truncate text-xs hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)] ${
                     isActive
                       ? "border-l-2 border-[var(--accent)] font-semibold text-[var(--ink)]"
                       : "border-l-2 border-transparent text-[var(--ink-3)] hover:text-[var(--ink-2)]"
@@ -548,14 +470,17 @@ export default function ReportReaderPage({
             })}
           </div>
 
-          <div className="pt-4 border-t border-[var(--line)] space-y-2">
-            <a
-              href="#sources"
-              className="text-xs font-mono text-[var(--ink-3)] hover:text-[var(--accent)] block"
-            >
-              Primary Sources ({sourcesCount}) →
-            </a>
-          </div>
+          {sourcesChapter && (
+            <div className="pt-4 border-t border-[var(--line)] space-y-2">
+              <a
+                href={`#${sourcesChapter.id}`}
+                onClick={(event) => navigateToSection(event, sourcesChapter.id)}
+                className="block cursor-pointer text-xs font-mono text-[var(--ink-3)] hover:text-[var(--accent)] hover:underline underline-offset-2 focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
+              >
+                Primary Sources ({sourcesCount}) →
+              </a>
+            </div>
+          )}
         </nav>
 
         {/* ── Column 2: CENTER READING COLUMN (Max 68ch) ─────────────── */}
@@ -593,14 +518,10 @@ export default function ReportReaderPage({
               components={{
                 h2: ({ children }) => {
                   const titleText = headingText(children);
-                  const base = headingSlug(titleText);
-                  const occurrence = renderedHeadingCounts.get(base) || 0;
-                  renderedHeadingCounts.set(base, occurrence + 1);
-                  const id = occurrence ? `${base}-${occurrence + 1}` : base;
                   return (
                     <h2
-                      id={id}
-                      className="font-serif text-[24px] font-semibold text-[var(--ink)] pt-10 pb-2 mt-8 border-t border-[var(--line)] scroll-mt-16 leading-snug"
+                      id={headingSlug(titleText)}
+                      className="relative font-serif text-[24px] font-semibold text-[var(--ink)] pt-10 pb-2 mt-8 border-t border-[var(--line)] scroll-mt-16 leading-snug"
                     >
                       {children}
                     </h2>
@@ -767,7 +688,7 @@ export default function ReportReaderPage({
                   {/* Relevancy */}
                   <div className="space-y-1">
                     <div className="flex justify-between text-[11px]">
-                      <span className="text-[var(--ink-2)]">Relevancy</span>
+                      <span className="text-[var(--ink-2)]" title="Mean evidence relevance judged across planned research tracks.">Track relevance</span>
                       <span className="font-semibold text-[var(--ink)]">
                         {scores.relevancy != null ? `${(scores.relevancy * 100).toFixed(0)}%` : "—"}
                       </span>
@@ -783,7 +704,7 @@ export default function ReportReaderPage({
                   {/* Authority */}
                   <div className="space-y-1">
                     <div className="flex justify-between text-[11px]">
-                      <span className="text-[var(--ink-2)]">Source authority estimate</span>
+                      <span className="text-[var(--ink-2)]" title="Heuristic source-domain estimate; it is not a verification of source accuracy.">Heuristic authority</span>
                       <span className="font-semibold text-[var(--ink)]">
                         {scores.authority != null ? `${(scores.authority * 100).toFixed(0)}%` : "—"}
                       </span>
@@ -799,7 +720,7 @@ export default function ReportReaderPage({
                   {/* Coverage */}
                   <div className="space-y-1">
                     <div className="flex justify-between text-[11px]">
-                      <span className="text-[var(--ink-2)]">Coverage</span>
+                      <span className="text-[var(--ink-2)]" title="Tracks with judged relevance of at least 0.65 and evidence from at least two distinct source domains or documents.">Track coverage</span>
                       <span className="font-semibold text-[var(--ink)]">
                         {scores.coverage != null ? `${(scores.coverage * 100).toFixed(0)}%` : "—"}
                       </span>
@@ -820,6 +741,9 @@ export default function ReportReaderPage({
 
                 <p className="text-xs font-sans text-[var(--ink-2)] pt-1 border-t border-[var(--line)] leading-relaxed">
                   Claim support is judged against cited excerpts. Unavailable judgments are shown as unmeasured; citation-ID validity is reported separately.
+                </p>
+                <p className="text-[11px] font-sans text-[var(--ink-3)] leading-relaxed">
+                  Track coverage requires relevant evidence from two independent sources. Authority is a domain heuristic, not a factuality check.
                 </p>
               </>
             ) : (
@@ -935,9 +859,13 @@ export default function ReportReaderPage({
         onClose={() => setRunInspectorOpen(false)}
         runId={reportId}
         token={token}
-        sources={report.sources || report.evidence_manifest || []}
+        sources={reportSources.map((source) => ({
+          ...source,
+          url: source.url || undefined,
+          authority_tier: source.authority_tier ?? undefined,
+        }))}
         findings={report.findings || []}
-        scores={scores}
+        scores={scores ?? undefined}
       />
     </div>
   );

@@ -111,6 +111,8 @@ def export_research_dossier(
     evidence_manifest: List[Dict[str, Any]],
     report_id: Optional[str] = None,
     scores: Optional[Dict[str, Any]] = None,
+    research_warnings: Optional[List[str]] = None,
+    budget_usage: Optional[Dict[str, Any]] = None,
 ) -> Dict[str, str]:
     """
     Exports the dossier in Markdown, JSON, and standalone HTML formats.
@@ -148,7 +150,9 @@ def export_research_dossier(
         "critic_audit": critic_audit,
         "citation_index": guard_results.get("citation_index", {}),
         "evidence_manifest": evidence_manifest,
-        "suggested_inquiries": critic_audit.get("suggested_next_inquiries", [])
+        "suggested_inquiries": critic_audit.get("suggested_next_inquiries", []),
+        "research_warnings": research_warnings or [],
+        "budget_usage": budget_usage,
     }
     with open(json_filename, "w", encoding="utf-8") as f:
         json.dump(full_payload, f, indent=2)
@@ -161,7 +165,8 @@ def export_research_dossier(
         safe_title = html.escape(str(sinfo.get("title", "Untitled")), quote=True)
         raw_url = str(sinfo.get("url") or "")
         safe_snippet = html.escape(str(sinfo.get("snippet", "")), quote=True)
-        safe_auth = html.escape(str(sinfo.get("authority_score", 0.7)), quote=True)
+        auth = sinfo.get("authority_score")
+        safe_auth = html.escape(f"Heuristic authority estimate: {float(auth):.2f}" if auth is not None else "Authority not measured", quote=True)
 
         if raw_url.startswith(("http://", "https://")):
             safe_url = html.escape(raw_url, quote=True)
@@ -174,7 +179,7 @@ def export_research_dossier(
         sources_html_items.append(
             f"<div class='source-box'>"
             f"<div class='source-title'>[{safe_sid}] {safe_title}</div>"
-            f"<div class='source-meta'>{url_link} | Authority: {safe_auth}</div>"
+            f"<div class='source-meta'>{url_link} | {safe_auth}</div>"
             f"<p style='font-size:0.85rem; color:#4b5563; margin-top:6px;'>{safe_snippet}...</p>"
             f"</div>"
         )

@@ -5,6 +5,7 @@ import time
 import json
 import glob
 import unittest
+import pytest
 from pathlib import Path
 from concurrent.futures import ThreadPoolExecutor
 
@@ -107,6 +108,7 @@ class TestAIEngineeringEvals(unittest.TestCase):
         print(f"  • Rejected Ungrounded Claims: {res['rejected_claims_count']}")
         print(f"  • Phantom Tag Scrubbing in Mixed Sentences: 100.0% clean")
 
+    @pytest.mark.integration
     def test_03_claim_level_faithfulness_llm_judge(self):
         """
         Extracts sample claims from real dossiers and uses an LLM-as-a-judge
@@ -253,6 +255,7 @@ class TestAIEngineeringEvals(unittest.TestCase):
         self.assertLess(t_par, t_seq, "Parallel execution was not faster than sequential")
         self.assertGreaterEqual(speedup_pct, 60.0, f"Expected >= 60% latency reduction, got {speedup_pct:.1f}%")
 
+    @pytest.mark.integration
     def test_05_litellm_gateway_failover_resilience(self):
         """
         Verifies LiteLLM Gateway auto-failover mechanism:

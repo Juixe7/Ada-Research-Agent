@@ -1,7 +1,7 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
-import { ArrowRight, Check, X, HelpCircle, CornerDownRight } from "lucide-react";
+import React, { useState } from "react";
+import { ArrowRight, Check, X, CornerDownRight } from "lucide-react";
 
 export interface ClarificationOption {
   id: string;
@@ -45,28 +45,14 @@ export default function ClarificationModal({
   onClose,
   loading = false,
 }: ClarificationModalProps) {
-  const [selectedClarification, setSelectedClarification] = useState<string | null>(null);
+  const [selectedClarification, setSelectedClarification] = useState<string | null>(
+    blueprint?.clarification_options?.[0]?.id ?? null
+  );
   const [somethingElseOpen, setSomethingElseOpen] = useState(false);
   const [customAnswer, setCustomAnswer] = useState("");
-  const [selectedAngles, setSelectedAngles] = useState<string[]>([]);
-
-  useEffect(() => {
-    if (blueprint) {
-      if (blueprint.clarification_options && blueprint.clarification_options.length > 0) {
-        setSelectedClarification(blueprint.clarification_options[0].id);
-      } else {
-        setSelectedClarification(null);
-      }
-
-      if (blueprint.research_angles && blueprint.research_angles.length > 0) {
-        setSelectedAngles(
-          blueprint.research_angles
-            .filter((a) => a.enabled !== false)
-            .map((a) => a.title)
-        );
-      }
-    }
-  }, [blueprint]);
+  const [selectedAngles, setSelectedAngles] = useState<string[]>(() =>
+    blueprint?.research_angles?.filter((angle) => angle.enabled !== false).map((angle) => angle.title) ?? []
+  );
 
   if (!isOpen || !blueprint) return null;
 

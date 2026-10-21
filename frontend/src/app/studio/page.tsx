@@ -1,57 +1,112 @@
 "use client";
 
-import { useState, useEffect, useRef } from "react";
-import { useRouter } from "next/navigation";
+import { Suspense, useState, useEffect, useRef, type SetStateAction } from "react";
+import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { 
-  Search, ArrowRight, Database, ChevronDown, 
+  ArrowRight, Database, ChevronDown,
   FileText, AlertCircle, Plus, RotateCcw, 
-  ExternalLink, Clock, X, Check
+  Clock, X
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import PreflightModal from "@/components/PreflightModal";
 import { useAuth } from "@/context/AuthContext";
 import { API_URL, formatDossierDate } from "@/lib/config";
+import { useResearchLaunch } from "@/hooks/useResearchLaunch";
+import type { ResearchDomain } from "@/hooks/useResearchLaunch";
+import type { ResearchReportSummary, VaultDocumentSummary } from "@/lib/api-types";
 
 const DOMAIN_FILTERS = [
   { id: "all", label: "All Evidence", desc: "Broad consensus" },
   { id: "academic", label: "Peer-Reviewed", desc: "arXiv, ScienceDirect, PubMed" },
   { id: "financial", label: "Market & Filings", desc: "Industry reports, SEC filings" },
   { id: "technical", label: "Specs & Docs", desc: "Engineering whitepapers & specs" },
-];
+] satisfies Array<{ id: ResearchDomain; label: string; desc: string }>;
 
-export default function ResearchStudioPage() {
+interface StudioHistoryState {
+  token: string;
+  reports: ResearchReportSummary[];
+  pending: boolean;
+  error: boolean;
+}
+
+interface StudioVaultState {
+  token: string;
+  documents: VaultDocumentSummary[];
+  selectedDocs: string[];
+  includeDocs: boolean;
+  pending: boolean;
+  error: boolean;
+}
+
+function ResearchStudioContent() {
   const router = useRouter();
+  const searchParams = useSearchParams();
   const { token, user, loading: authLoading } = useAuth();
 
   // Search query & options
-  const [query, setQuery] = useState("");
+  const [query, setQuery] = useState(() => searchParams.get("q") ?? "");
   const [depth, setDepth] = useState<"quick" | "standard" | "deep">("standard");
-  const [selectedDomain, setSelectedDomain] = useState("all");
-  const [includeDocs, setIncludeDocs] = useState(true);
-  const [loading, setLoading] = useState(false);
-  const [errorMsg, setErrorMsg] = useState("");
+  const [selectedDomain, setSelectedDomain] = useState<ResearchDomain>("all");
+  const {
+    loading,
+    error: errorMsg,
+    scopingModalOpen,
+    blueprint: blueprintData,
+    preparedQuery,
+    recalibrating,
+    recalibrationError,
+    start: startResearch,
+    confirm: confirmResearch,
+    skip: skipScoping,
+    recalibrate: recalibrateScope,
+    closeScoping,
+  } = useResearchLaunch(token);
 
   // Recent reports for left sidebar
-  const [recentReports, setRecentReports] = useState<any[]>([]);
-  const [loadingHistory, setLoadingHistory] = useState(true);
-  const [historyError, setHistoryError] = useState(false);
+  const [historyState, setHistoryState] = useState<StudioHistoryState | null>(null);
+  const currentHistory = token && historyState?.token === token ? historyState : null;
+  const recentReports = currentHistory?.reports ?? [];
+  const historyRequestPending = Boolean(token) && (!currentHistory || currentHistory.pending);
+  const loadingHistory = Boolean(token) && historyRequestPending;
+  const historyError = currentHistory?.error ?? false;
 
   // Vault documents & anchored popover
-  const [vaultDocs, setVaultDocs] = useState<any[]>([]);
-  const [loadingVault, setLoadingVault] = useState(true);
-  const [vaultError, setVaultError] = useState(false);
-  const [selectedDocs, setSelectedDocs] = useState<string[]>([]);
+  const [vaultState, setVaultState] = useState<StudioVaultState | null>(null);
+  const currentVault = token && vaultState?.token === token ? vaultState : null;
+  const vaultDocs = currentVault?.documents ?? [];
+  const selectedDocs = currentVault?.selectedDocs ?? [];
+  const includeDocs = currentVault?.includeDocs ?? false;
+  const vaultRequestPending = Boolean(token) && (!currentVault || currentVault.pending);
+  const loadingVault = Boolean(token) && vaultRequestPending;
+  const vaultError = currentVault?.error ?? false;
   const [popoverOpen, setPopoverOpen] = useState(false);
   const popoverRef = useRef<HTMLDivElement>(null);
   const textareaRef = useRef<HTMLTextAreaElement>(null);
 
-  // Pre-flight blueprint modal
-  const [scopingModalOpen, setScopingModalOpen] = useState(false);
-  const [blueprintData, setBlueprintData] = useState<any>(null);
-  const [recalibrating, setRecalibrating] = useState(false);
-  const [activeSessionId, setActiveSessionId] = useState<string | null>(null);
-  const [preparedQuery, setPreparedQuery] = useState<string>("");
+  const setSelectedDocs = (update: SetStateAction<string[]>) => {
+    if (!token) return;
+    setVaultState((current) => {
+      if (!current || current.token !== token) return current;
+      return {
+        ...current,
+        selectedDocs: typeof update === "function" ? update(current.selectedDocs) : update,
+      };
+    });
+  };
+
+  const setIncludeDocs = (update: SetStateAction<boolean>) => {
+    if (!token) return;
+    setVaultState((current) => {
+      if (!current || current.token !== token) return current;
+      return {
+        ...current,
+        includeDocs: typeof update === "function" ? update(current.includeDocs) : update,
+      };
+    });
+  };
+
+  const [activeSessionId, setActiveSessionId] = useState<string | null>(() => searchParams.get("session_id"));
 
   // Guard: if unauthenticated, redirect to login
   useEffect(() => {
@@ -60,60 +115,61 @@ export default function ResearchStudioPage() {
     }
   }, [user, authLoading, router]);
 
-  // Read URL query params if user launched from Dashboard, Home, or Session Redirect
-  useEffect(() => {
-    if (typeof window !== "undefined") {
-      const params = new URLSearchParams(window.location.search);
-      const q = params.get("q");
-      const sid = params.get("session_id");
-      if (q) setQuery(q);
-      if (sid) setActiveSessionId(sid);
-    }
-  }, []);
-
   // Fetch recent reports for left workbench sidebar
   useEffect(() => {
-    if (!token) {
-      setLoadingHistory(false);
-      return;
-    }
+    if (!token) return;
+    const controller = new AbortController();
     const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
 
-    fetch(`${API_URL}/api/reports`, { headers })
+    fetch(`${API_URL}/api/reports`, { headers, signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error("Could not load research history");
         return res.json();
       })
-      .then((data) => {
-        if (data.reports) setRecentReports(data.reports.slice(0, 10));
+      .then((data: { reports?: ResearchReportSummary[] }) => {
+        if (controller.signal.aborted) return;
+        setHistoryState({ token, reports: data.reports?.slice(0, 10) ?? [], pending: false, error: false });
       })
       .catch((err) => {
+        if (controller.signal.aborted) return;
         console.warn("Failed to load recent reports:", err);
-        setHistoryError(true);
-      })
-      .finally(() => setLoadingHistory(false));
+        setHistoryState({ token, reports: [], pending: false, error: true });
+      });
+
+    return () => controller.abort();
   }, [token]);
 
   // Fetch vault documents
   useEffect(() => {
     if (!token) return;
+    const controller = new AbortController();
     const headers: Record<string, string> = { Authorization: `Bearer ${token}` };
 
-    fetch(`${API_URL}/api/vault`, { headers })
+    fetch(`${API_URL}/api/vault`, { headers, signal: controller.signal })
       .then((res) => {
         if (!res.ok) throw new Error("Could not load source library");
         return res.json();
       })
-      .then((data) => {
-        if (data.documents) {
-          setVaultDocs(data.documents);
-          const searchableDocs = data.documents.filter((d: any) => (d.chunk_count || 0) > 0);
-          setSelectedDocs(searchableDocs.map((d: any) => d.doc_name));
-          setIncludeDocs(searchableDocs.length > 0);
-        }
+      .then((data: { documents?: VaultDocumentSummary[] }) => {
+        if (controller.signal.aborted) return;
+        const documents = data.documents ?? [];
+        const searchableDocs = documents.filter((document) => (document.chunk_count || 0) > 0);
+        setVaultState({
+          token,
+          documents,
+          selectedDocs: searchableDocs.map((document) => document.doc_name),
+          includeDocs: searchableDocs.length > 0,
+          pending: false,
+          error: false,
+        });
       })
-      .catch(() => setVaultError(true))
-      .finally(() => setLoadingVault(false));
+      .catch((error: unknown) => {
+        if (controller.signal.aborted) return;
+        console.warn("Failed to load source library:", error);
+        setVaultState({ token, documents: [], selectedDocs: [], includeDocs: false, pending: false, error: true });
+      });
+
+    return () => controller.abort();
   }, [token]);
 
   // Close vault popover on outside click
@@ -127,133 +183,16 @@ export default function ResearchStudioPage() {
     return () => document.removeEventListener("mousedown", handleClickOutside);
   }, []);
 
-  const handleStartResearch = async (e?: React.FormEvent) => {
+  const handleStartResearch = (e?: React.FormEvent) => {
     if (e) e.preventDefault();
-    const cleanQuery = query.trim();
-    if (!cleanQuery || loading) return;
-
-    setLoading(true);
-    setErrorMsg("");
-
-    let finalQuery = cleanQuery;
-    if (selectedDomain === "academic" && !cleanQuery.toLowerCase().includes("academic")) {
-      finalQuery += " [Focus: peer-reviewed literature, academic research]";
-    } else if (selectedDomain === "financial" && !cleanQuery.toLowerCase().includes("financial")) {
-      finalQuery += " [Focus: industry filings, market analysis, economic data]";
-    } else if (selectedDomain === "technical" && !cleanQuery.toLowerCase().includes("technical")) {
-      finalQuery += " [Focus: technical specifications, engineering benchmarks, whitepapers]";
-    }
-    setPreparedQuery(finalQuery);
-
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-
-    try {
-      // Step 1: Pre-flight scoping check
-      const res = await fetch(`${API_URL}/api/research/preflight`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          query: finalQuery,
-          depth: depth,
-          include_user_docs: includeDocs,
-          selected_docs: includeDocs ? selectedDocs : []
-        })
-      });
-
-      if (!res.ok) throw new Error("Preflight check failed");
-      const blueprint = await res.json();
-      setBlueprintData(blueprint);
-      setScopingModalOpen(true);
-    } catch (err: any) {
-      console.warn("Preflight check bypassed, dispatching directly:", err);
-      dispatchFinalResearch(finalQuery, depth, null, []);
-    } finally {
-      setLoading(false);
-    }
-  };
-
-  const dispatchFinalResearch = async (
-    targetQuery: string,
-    targetDepth: string,
-    clarificationChoice: string | null,
-    customAngles: string[]
-  ) => {
-    setLoading(true);
-    setErrorMsg("");
-
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-
-    try {
-      const payload: any = {
-        query: targetQuery,
-        depth: targetDepth,
-        include_user_docs: includeDocs,
-        selected_docs: includeDocs ? selectedDocs : []
-      };
-
-      if (clarificationChoice) {
-        payload.clarification_choice = clarificationChoice;
-      }
-      if (customAngles && customAngles.length > 0) {
-        payload.custom_angles = customAngles;
-      }
-      if (activeSessionId) {
-        payload.session_id = activeSessionId;
-      }
-
-      const res = await fetch(`${API_URL}/api/research`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify(payload)
-      });
-
-      if (!res.ok) {
-        const errData = await res.json().catch(() => ({}));
-        throw new Error(errData.detail || "Failed to start investigation");
-      }
-
-      const data = await res.json();
-      const runId = data.report_id || data.run_id || data.job_id;
-      if (runId) {
-        router.push(`/run/${runId}`);
-      } else {
-        throw new Error("Missing report run ID from engine response");
-      }
-    } catch (err: any) {
-      console.error("Research start failure:", err);
-      setErrorMsg(err.message || "Failed to initiate deep research");
-      setLoading(false);
-    }
-  };
-
-  const handleRecalibrate = async (modificationText: string) => {
-    setRecalibrating(true);
-    const headers: Record<string, string> = { "Content-Type": "application/json" };
-    if (token) headers["Authorization"] = `Bearer ${token}`;
-
-    try {
-      const res = await fetch(`${API_URL}/api/research/preflight`, {
-        method: "POST",
-        headers,
-        body: JSON.stringify({
-          query: preparedQuery,
-          depth,
-          include_user_docs: includeDocs,
-          selected_docs: includeDocs ? selectedDocs : [],
-          user_modification: modificationText,
-        })
-      });
-
-      if (!res.ok) throw new Error("Recalibration failed");
-      const updatedBlueprint = await res.json();
-      setBlueprintData(updatedBlueprint);
-    } catch (err) {
-      console.error("Recalibrate failed:", err);
-    } finally {
-      setRecalibrating(false);
-    }
+    void startResearch({
+      query,
+      depth,
+      domain: selectedDomain,
+      includeDocs,
+      selectedDocs,
+      sessionId: activeSessionId,
+    });
   };
 
   const handleKeyDown = (e: React.KeyboardEvent<HTMLTextAreaElement>) => {
@@ -463,7 +402,7 @@ export default function ResearchStudioPage() {
                       <button
                         key={f.id}
                         type="button"
-                        onClick={() => setSelectedDomain(f.id)}
+                  onClick={() => setSelectedDomain(f.id)}
                         className={`px-3 py-1.5 rounded-[6px] text-xs transition-all cursor-pointer ${
                           isSelected
                             ? "bg-[var(--accent-soft)] text-[var(--accent)] border border-[var(--accent)]/60 font-semibold shadow-xs"
@@ -680,21 +619,25 @@ export default function ResearchStudioPage() {
 
       {/* Pre-flight Blueprint Calibration Dialog */}
       <PreflightModal
+        key={blueprintData ? JSON.stringify(blueprintData) : "empty-blueprint"}
         isOpen={scopingModalOpen}
-        onClose={() => setScopingModalOpen(false)}
+        onClose={closeScoping}
         query={preparedQuery}
         blueprint={blueprintData}
-        onConfirm={({ clarificationChoice, customAngles }) => {
-          setScopingModalOpen(false);
-          dispatchFinalResearch(preparedQuery, depth, clarificationChoice, customAngles);
-        }}
-        onSkip={() => {
-          setScopingModalOpen(false);
-          dispatchFinalResearch(preparedQuery, depth, null, []);
-        }}
-        onRecalibrate={handleRecalibrate}
+        onConfirm={({ clarificationChoice, customAngles }) => confirmResearch(clarificationChoice, customAngles)}
+        onSkip={skipScoping}
+        onRecalibrate={recalibrateScope}
         recalibrating={recalibrating}
+        recalibrationError={recalibrationError}
       />
     </div>
+  );
+}
+
+export default function ResearchStudioPage() {
+  return (
+    <Suspense fallback={<div className="min-h-screen bg-[var(--paper)]" />}>
+      <ResearchStudioContent />
+    </Suspense>
   );
 }

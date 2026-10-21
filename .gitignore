@@ -31,6 +31,8 @@ frontend/out/
 frontend/build/
 frontend/*.tsbuildinfo
 .agents/
+.playwright-cli/
+output/
 
 # Local Notes & Interview Prep
 interview_guide/

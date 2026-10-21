@@ -1,6 +1,6 @@
 "use client";
 
-import { useState, useEffect, Suspense } from "react";
+import { useState, Suspense } from "react";
 import { useRouter, useSearchParams } from "next/navigation";
 import Link from "next/link";
 import { ArrowLeft, ArrowRight, AlertCircle, CheckCircle2, Lock, Loader2 } from "lucide-react";
@@ -12,19 +12,12 @@ function ResetPasswordForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
 
-  const [token, setToken] = useState("");
+  const [token, setToken] = useState(() => searchParams.get("token") ?? "");
   const [newPassword, setNewPassword] = useState("");
   const [confirmPassword, setConfirmPassword] = useState("");
   const [loading, setLoading] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
   const [successMsg, setSuccessMsg] = useState("");
-
-  useEffect(() => {
-    const queryToken = searchParams.get("token");
-    if (queryToken) {
-      setToken(queryToken);
-    }
-  }, [searchParams]);
 
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
@@ -62,7 +55,7 @@ function ResetPasswordForm() {
       } else {
         setErrorMsg(data.detail || "Password reset failed. Token may be invalid or expired.");
       }
-    } catch (err: any) {
+    } catch {
       setErrorMsg("Failed to connect to authentication service.");
     } finally {
       setLoading(false);

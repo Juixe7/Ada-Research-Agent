@@ -140,11 +140,11 @@ Some unverified reports claim $10/kWh cost [S99].
     assert len(dossier["findings"]) == 2
     assert len(dossier["claims"]) == 3
     # Check claim verdicts
-    supported_claims = [c for c in dossier["claims"] if c["verdict"] == "supported"]
+    unverified_claims = [c for c in dossier["claims"] if c["verdict"] == "unverified"]
     flagged_claims = [c for c in dossier["claims"] if c["verdict"] == "flagged"]
-    assert len(supported_claims) == 2
+    assert len(unverified_claims) == 2
     assert len(flagged_claims) == 1
-    print(f"Verified full dossier query: {dossier['sources_count']} sources, {len(supported_claims)} supported claims, {len(flagged_claims)} flagged claims.")
+    print(f"Verified full dossier query: {dossier['sources_count']} sources, {len(unverified_claims)} unverified claims, {len(flagged_claims)} guard-rejected claims.")
     print("✓ Test 2 Passed!")
 
 

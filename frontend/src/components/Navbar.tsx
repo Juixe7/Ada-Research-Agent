@@ -12,25 +12,35 @@ import AdaPrismLogo from "@/components/AdaPrismLogo";
 export default function Navbar() {
   const pathname = usePathname();
   const { user, logout } = useAuth();
-  const [dropdownOpen, setDropdownOpen] = useState(false);
-  const [mobileNavOpen, setMobileNavOpen] = useState(false);
+  const [navState, setNavState] = useState({ pathname, dropdownOpen: false, mobileNavOpen: false });
+  const dropdownOpen = navState.pathname === pathname && navState.dropdownOpen;
+  const mobileNavOpen = navState.pathname === pathname && navState.mobileNavOpen;
+  const setDropdownOpen = (open: boolean) => setNavState((current) => ({
+    pathname,
+    dropdownOpen: open,
+    mobileNavOpen: current.pathname === pathname ? current.mobileNavOpen : false,
+  }));
+  const setMobileNavOpen = (open: boolean) => setNavState((current) => ({
+    pathname,
+    dropdownOpen: current.pathname === pathname ? current.dropdownOpen : false,
+    mobileNavOpen: open,
+  }));
   const dropdownRef = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    setDropdownOpen(false);
-    setMobileNavOpen(false);
-  }, [pathname]);
 
   // Close dropdown on outside click
   useEffect(() => {
     const handleClickOutside = (e: MouseEvent) => {
       if (dropdownRef.current && !dropdownRef.current.contains(e.target as Node)) {
-        setDropdownOpen(false);
+        setNavState((current) => ({
+          pathname,
+          dropdownOpen: false,
+          mobileNavOpen: current.pathname === pathname ? current.mobileNavOpen : false,
+        }));
       }
     };
     document.addEventListener("mousedown", handleClickOutside);
     return () => document.removeEventListener("mousedown", handleClickOutside);
-  }, []);
+  }, [pathname]);
 
   const navLinks = user ? [
     { href: "/dashboard", label: "Dashboard" },
@@ -155,13 +165,13 @@ export default function Navbar() {
             <>
               <Link
                 href="/login"
-                className="px-3.5 py-1.5 rounded-[6px] text-xs font-medium text-[var(--ink-2)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors"
+                className="shrink-0 whitespace-nowrap px-3.5 py-1.5 rounded-[6px] text-xs font-medium text-[var(--ink-2)] hover:text-[var(--ink)] hover:bg-[var(--surface-2)] transition-colors max-[360px]:hidden"
               >
                 Sign In
               </Link>
               <Link
                 href="/register"
-                className="btn-primary text-xs px-3.5 py-1.5 rounded-[6px] shadow-xs"
+                className="btn-primary shrink-0 whitespace-nowrap text-xs px-3.5 py-1.5 rounded-[6px] shadow-xs"
               >
                 Get Started
               </Link>
@@ -170,8 +180,8 @@ export default function Navbar() {
 
           <button
             type="button"
-            onClick={() => setMobileNavOpen((open) => !open)}
-            className="inline-flex h-10 w-10 items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] md:hidden"
+            onClick={() => setMobileNavOpen(!mobileNavOpen)}
+            className="inline-flex h-11 w-11 min-h-11 min-w-11 shrink-0 items-center justify-center rounded-md border border-[var(--line)] text-[var(--ink-2)] hover:bg-[var(--surface-2)] md:hidden"
             aria-label={mobileNavOpen ? "Close navigation menu" : "Open navigation menu"}
             aria-expanded={mobileNavOpen}
             aria-controls="mobile-primary-navigation"
@@ -197,6 +207,24 @@ export default function Navbar() {
                   </Link>
                 );
               })}
+              {!user && (
+                <div className="mt-2 flex gap-2 border-t border-[var(--line)] pt-3">
+                  <Link
+                    href="/login"
+                    onClick={() => setMobileNavOpen(false)}
+                    className="flex min-h-11 flex-1 items-center justify-center rounded-md border border-[var(--line)] px-3 text-sm font-medium text-[var(--ink-2)]"
+                  >
+                    Sign in
+                  </Link>
+                  <Link
+                    href="/register"
+                    onClick={() => setMobileNavOpen(false)}
+                    className="btn-primary min-h-11 flex-1 justify-center whitespace-nowrap text-sm"
+                  >
+                    Get started
+                  </Link>
+                </div>
+              )}
             </div>
           </div>
         )}

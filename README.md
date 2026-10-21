@@ -40,7 +40,7 @@ Research across web pages and personal documents is difficult to reproduce and a
 | Vector retrieval | Qdrant with FastEmbed `BAAI/bge-small-en-v1.5` (384 dimensions) |
 | Async jobs and events | Celery + Redis when enabled; FastAPI background tasks and in-process event fallback for local mode |
 | Persistence | SQLite by default; PostgreSQL URL support; Qdrant for vectors; filesystem artifacts |
-| Operations | Docker Compose, Caddy, optional Langfuse via LiteLLM callback |
+| Operations | Docker Compose, Caddy, optional Langfuse SDK instrumentation |
 
 ## 2. Architecture Overview
 
@@ -77,7 +77,7 @@ flowchart TB
 | Integrations (`packages/llm_gateway/`, `engine/ingest/`) | Model routing, rate limits, cache, provider calls, web search/fetch, document parsing, embeddings. |
 | Presentation (`frontend/src/`) | Login, research workspace, vault, run/report views, history, settings, and architecture visualization. |
 
-The current implementation is a modular monolith with a separately runnable worker, rather than independently deployed domain services. SQL stores identity and run/report metadata; local report files and uploaded documents are also required for some workflows. Compose currently defaults to SQLite, which is convenient for a single-host demonstration but is not a high-availability production database configuration.
+The current implementation is a modular monolith with a separately runnable worker, rather than independently deployed domain services. SQL stores identity and run/report metadata; local report files and uploaded documents are also required for some workflows. Compose currently defaults to SQLite, which is suitable for local development and single-host deployments, but is not a high-availability database configuration.
 
 ## 3. Project Structure
 
@@ -90,6 +90,8 @@ The current implementation is a modular monolith with a separately runnable work
 │   ├── guards/             # Citation and evidence grounding
 │   ├── ingest/             # PDF, DOCX, CSV, text, web retrieval and chunking
 │   ├── storage/            # Relational repository and Qdrant vector store
+│   ├── services/           # Research-run, preflight, report and vault use cases
+│   ├── schemas/            # API request and response DTOs
 │   ├── workers/            # Search and per-track research execution
 │   ├── auth.py             # Registration, login, JWT and password reset
 │   ├── celery_app.py       # Queue configuration and job-state storage
@@ -102,9 +104,10 @@ The current implementation is a modular monolith with a separately runnable work
 ├── packages/llm_gateway/   # Model groups, LiteLLM client, cache, limiter and trace IDs
 ├── frontend/src/
 │   ├── app/                # Next.js routes and global styles
-│   ├── components/         # Shared navigation, auth, inspector and dialog components
+│   ├── components/         # Shared UI plus focused run and vault panels
 │   ├── context/            # Client authentication state
-│   └── lib/                # API URL configuration and frontend helpers
+│   ├── hooks/              # Research launch, follow-up, event-stream and vault workflows
+│   └── lib/                # API DTOs, report transforms, run helpers and config
 ├── scripts/                # Offline evaluation / operational scripts
 ├── tests/                  # Unit and workflow tests
 ├── Dockerfile              # Backend/worker image
@@ -117,6 +120,12 @@ The current implementation is a modular monolith with a separately runnable work
 | Package/module | Responsibility and key interface |
 |---|---|
 | `engine.server` | FastAPI routes; validates inputs and checks private resource access before reads/writes. |
+| `engine.services.research_runs` | Creates owned sessions/turns, tracks live jobs, dispatches workers, and resolves cancellation/status fallbacks. |
+| `engine.services.preflight` | Resolves only the user's selected private documents before query scoping. |
+| `engine.services.report_followups` | Answers from saved evidence, verifies citations, and persists focused addenda. |
+| `engine.services.reports` / `engine.services.vault` | Own report access/history/sharing and private document lifecycle operations. |
+| `engine.services.errors` | Provides transport-independent service errors; each use case keeps a domain-specific subtype. |
+| `engine.schemas` | Defines the Pydantic request/response contracts used by API routes. |
 | `engine.graph.pipeline` | Creates the LangGraph and seeds `RunState`; `execute_graph_pipeline(...)` returns final state. |
 | `engine.graph.nodes` | Implements scope, plan, research, critic, arbitration, outline, section synthesis, assembly, verification, scoring, finalization. |
 | `engine.tasks` | Runs the graph, normalizes evidence, persists lifecycle and artifacts; Celery task entry point. |
@@ -130,6 +139,8 @@ The current implementation is a modular monolith with a separately runnable work
 | `engine.events` / `engine.celery_app` | Event streaming and asynchronous job state. |
 | `packages.llm_gateway` | Provider model groups, failover, rate limiting, response cache, structured parsing, usage and optional tracing. |
 | `frontend/src/app` | Page routes: home/studio, dashboard, history, vault, report, run, session, settings, login/register/reset, architecture. |
+| `frontend/src/hooks` | Owns cohesive client workflows: research preflight/launch, evidence follow-ups, run event streaming and vault operations. |
+| `frontend/src/lib/report-content.ts` | Shares report chapter parsing, citation lookup and source merging across report UI. |
 
 ## 4. Core Features & Subsystems
 
@@ -150,7 +161,7 @@ final_state = execute_graph_pipeline(
     depth="deep",
     include_user_docs=True,
     report_id=run_id,
-    selected_docs=["resume.pdf"],
+    selected_docs=["research-notes.pdf"],
     user_id=user_id,
 )
 ```
@@ -159,7 +170,7 @@ The actual function accepts optional `custom_angles`, `clarification_choice`, an
 
 ### 4.2 Research planning and evidence collection
 
-The planner converts the question and optional user angles into research tracks/search queries. Track workers query Serper when configured, fetch candidate pages through the bounded scraper, and may use search-result snippets when a page cannot be fetched. Selected private documents are retrieved from Qdrant with owner filtering, so the upload owner is part of the retrieval boundary. Evidence normalization assigns stable web IDs (`S1...`) and document IDs (`D1...`) and merges duplicates while retaining associated track IDs.
+The planner converts the question and optional user angles into research tracks/search queries. Track workers query Serper when configured, exclude social/profile pages from default evidence, prioritize stronger domains, fetch candidate pages through the bounded scraper, and may use search-result snippets when a page cannot be fetched. Selected private documents are retrieved from Qdrant with owner filtering, so the upload owner is part of the retrieval boundary. Evidence normalization assigns stable web IDs (`S1...`) and document IDs (`D1...`) and merges duplicates, including matching NASA press-release headlines, while retaining associated track IDs.
 
 Document ingestion supports PDF, DOCX, CSV and pasted text. PDF extraction retains page information; chunking uses detected headings/section boundaries and overlap for long units. Chunk boundaries are retrieval units, not a promise to reproduce every source document's semantic outline exactly. Reindexing reprocesses a stored upload and replaces its indexed chunks.
 
@@ -175,7 +186,7 @@ Follow-up questions rank the report's saved evidence and generate an answer from
 
 `LLMClient` routes calls by `small`, `large`, `write`, or `judge` model group; applies a token-bucket limiter; checks a deterministic response cache; retries a rate-limit response once; uses the configured fallback model on failure; and attempts one structured-output repair call when a Pydantic schema is supplied. `LLMResult` reports content, parsed data, model/group, token usage, latency, estimated cost, cache hit, degraded status and error.
 
-Langfuse is optional and disabled by default. Setting its enable flag and credentials adds LiteLLM's `langfuse_otel` callback. Model prompts and completions may contain private research or uploaded-document text, so only enable tracing in a project/account whose retention and access settings are appropriate. No Langfuse service is included in Ada's Compose stack.
+Langfuse instrumentation lives at two explicit boundaries: the optional SDK creates a root observation for each research graph invocation, and Ada's LLM gateway creates a child generation for each uncached provider attempt. Both use the same Langfuse client and active trace context, so model inputs, outputs, token usage, and provider failures remain attached to the research run without relying on LiteLLM's separate OpenTelemetry callback lifecycle. The SDK flushes the completed trace when the run ends. Search, fetch, vault retrieval, and UI lifecycle events remain visible in Ada's run inspector rather than being duplicated into Langfuse. The local runner is separate from Ada's deployment Compose stack, which does not receive Langfuse credentials. Traces can contain research prompts and model outputs, so keep the Langfuse instance and keys local and use only a project whose retention/access settings are appropriate.
 
 ### 4.6 Authentication, privacy and persistence
 
@@ -185,10 +196,23 @@ The API issues a seven-day HS256 bearer JWT. User-owned sessions and vault docum
 
 ### Research orchestration
 
-- `engine.tasks.run_research_pipeline_sync(...)` is the synchronous orchestration entry point used by background execution. It runs the graph, updates lifecycle state, normalizes/persists results, and writes report artifacts. It records failures as failed run state and re-raises/returns according to the task boundary; inspect its implementation before wrapping it with a new retry policy.
-- `engine.tasks.run_research_pipeline_task(...)` is the Celery task wrapper. Celery delivery and result state depend on Redis and `USE_CELERY`.
+- `engine.services.research_runs.ResearchRunService.start(...)` validates the run command, verifies selected-document/session ownership, creates the durable session turn, registers initial state and dispatches the worker.
+- `engine.tasks.run_research_pipeline_sync(...)` invokes the LangGraph and returns a normalized result shape. Individual graph nodes persist evidence, scores and report artifacts through their adapters.
+- `engine.tasks.run_research_pipeline_task(...)` owns the worker terminal transition. It accepts completion only when report Markdown exists and the durable turn is present, commits the turn before publishing live completion, and rolls back before attempting to persist failure after an exception.
+- Worker failures are fully logged server-side and exposed to the UI as a safe summary. This avoids leaking provider or database exception details into run status/events.
+- Celery delivery and distributed result state depend on Redis and `USE_CELERY`; local mode dispatches through FastAPI background tasks.
 - `engine.graph.pipeline.build_research_graph() -> CompiledGraph` registers nodes and conditional edges. A reusable graph is compiled at module import.
 - `execute_graph_pipeline(...) -> Dict[str, Any]` constructs initial typed state and invokes the compiled graph. Input is the query and run configuration; failures from graph nodes can propagate unless a node handles them.
+
+### Frontend workflow boundaries
+
+| Hook or component | Responsibility |
+|---|---|
+| `useResearchLaunch` | Snapshots the selected query/depth/domain/vault scope, performs preflight and recalibration, prevents duplicate dispatch and routes to the new run. |
+| `useRunEventStream` | Owns SSE connection, event parsing, reconnects with backoff and resumes from the last event ID; durable-status polling keeps terminal state accurate while reconnecting. |
+| `useReportFollowups` | Sends evidence-scoped questions, owns answer/loading state and aborts a request when its report view is left. |
+| `useVaultLibrary` | Owns source list, upload/paste/reindex/delete and preview request state. |
+| Dashboard/studio resource state | Keys private history and vault results by the current auth token and aborts stale requests on navigation or identity changes. |
 
 ### Integrations and data access
 
@@ -200,7 +224,7 @@ The API issues a seven-day HS256 bearer JWT. User-owned sessions and vault docum
 
 ### Error handling conventions
 
-HTTP boundary errors use FastAPI `HTTPException`; request shape errors are validated by Pydantic. Missing or inaccessible private resources generally return 404 to avoid disclosing existence. The LLM boundary returns `LLMResult.error` for provider failures; persistent-store initialization raises a chained `RuntimeError`; background job failures are recorded in job/run state. Optional status/event persistence currently uses best-effort exception handling in some graph helpers, so the primary research run may continue while telemetry/progress persistence is incomplete. Treat this distinction as part of the operational contract.
+Request shape errors are validated by Pydantic. Expected application failures derive from `engine.services.errors.ServiceError`, carry an HTTP status and safe detail, and are translated at the API boundary; run, report, follow-up, preflight and vault services use named subtypes. Missing or inaccessible private resources generally return 404 to avoid disclosing existence. The LLM boundary returns `LLMResult.error` for provider failures; persistent-store initialization raises a chained `RuntimeError`; worker failures are logged with detail but returned to clients as a safe summary. Optional status/event persistence still uses best-effort exception handling in some graph helpers, so the primary research run may continue while telemetry/progress persistence is incomplete. Treat this distinction as part of the operational contract.
 
 ## 6. API Documentation
 
@@ -231,7 +255,7 @@ All paths below are relative to the backend origin (default `http://localhost:80
 | `GET /health` | None | `{status:"ok"}` | 200 |
 | `POST /api/research/preflight` | `{query,depth="deep",include_user_docs=true,selected_docs?,user_modification?}` | Scope/preflight assessment and clarifying information | 200; 401 where protected; 422 |
 | `POST /api/research` | `{query,depth="deep",include_user_docs=true,selected_docs?,clarification_choice?,custom_angles?,session_id?,blocked_domains?}` + bearer | Accepted run/report identifier and initial lifecycle metadata; processing continues asynchronously | 200; 401/404/422; 503 if dispatch unavailable |
-| `POST /api/research/{report_id}/cancel` | Bearer token | Cancellation status | 200; 404; 409 if terminal/uncancellable state |
+| `POST /api/research/{report_id}/cancel` | Bearer token | Latest known run state after cancellation is requested | 200; 404 private/missing |
 | `GET /api/report/status/{report_id}` | Optional bearer | Job state including status, stage, progress and error as available | 200; 404 private/missing |
 | `GET /api/report/{report_id}` | Optional bearer | Persisted report JSON | 200; 404 private/missing/unavailable |
 | `GET /api/v1/runs/{report_id}/report` | Same as report endpoint | Legacy/versioned alias | Same |
@@ -279,8 +303,12 @@ Root `.env` is loaded by `engine/config.py`; Docker Compose also interpolates ro
 | `LLM_JUDGE_PRIMARY` / `LLM_JUDGE_FALLBACK` | `groq/qwen/qwen3.8-27b` / `gemini/gemini-flash-latest` | Claim/relevance evaluation group. |
 | `LLM_DEFAULT_RPM` | `60` | Default request rate limit. |
 | `LLM_DEFAULT_TPM` | `100000` | Default estimated token rate limit. |
-| `RUN_COST_BUDGET_USD` | `5.0` | Per-run cost budget used by pipeline logic. |
-| `RUN_TOKEN_BUDGET` | `250000` | Per-run token budget used by pipeline logic. |
+| `RUN_COST_BUDGET_USD` | `5.0` | Stops starting new model calls after recorded run cost reaches this amount. An in-flight provider call can finish above the limit. |
+| `RUN_TOKEN_BUDGET` | `250000` | Stops starting a model call when recorded usage plus its requested output allowance would exceed the limit. |
+| `MAX_SEARCHES_PER_RUN` | `30` | Maximum search-provider requests reserved by one research run. |
+| `MAX_FETCHES_PER_RUN` | `20` | Maximum page-fetch operations reserved across parallel tracks. |
+| `RUN_TIME_BUDGET_SECONDS` | `900` | Run deadline after which no new model request or search/page fetch starts; a request already in flight may finish before the run can stop. |
+| `RESEARCH_CONCURRENCY` | `3` | Maximum parallel research tracks in one run. |
 | `DATABASE_URL` | SQLite file under repository root | SQLAlchemy URL; PostgreSQL is supported. Compose defaults to `/app/data/ada.db`. |
 | `JWT_SECRET` | ephemeral in development; required in production | HS256 signing secret. Local ephemeral key invalidates sessions after restart. |
 | `APP_ENV` | `development` | `production` makes missing `JWT_SECRET` a startup error. |
@@ -288,9 +316,9 @@ Root `.env` is loaded by `engine/config.py`; Docker Compose also interpolates ro
 | `USE_CELERY` | `false` | `true` selects Celery dispatch; local mode uses background tasks and fallbacks. Compose sets true. |
 | `QDRANT_URL` | empty | Remote Qdrant URL. Empty uses local persisted path `qdrant_data`. |
 | `QDRANT_API_KEY` | empty | Optional Qdrant Cloud/service key. |
-| `LANGFUSE_ENABLED` | `false` | Opt-in LiteLLM tracing; requires both Langfuse keys. |
+| `LANGFUSE_ENABLED` | `false` | Opt-in Langfuse traces for research runs and model generations; requires both Langfuse keys. |
 | `LANGFUSE_PUBLIC_KEY` / `LANGFUSE_SECRET_KEY` | empty | Langfuse project credentials. Treat prompts/results as sensitive data. |
-| `LANGFUSE_OTEL_HOST` | `http://localhost:3000` | Langfuse OTEL endpoint; Docker Desktop may need `http://host.docker.internal:3000`. |
+| `LANGFUSE_BASE_URL` | `http://localhost:3002` | Optional Langfuse server URL. Deployment Compose does not pass it to Ada containers. |
 | `PUBLIC_APP_URL` | `http://localhost:3000` in sample | Base URL for password-reset links. |
 | `SMTP_HOST` / `SMTP_PORT` | empty / `587` | SMTP transport for reset email. |
 | `SMTP_USER` / `SMTP_PASSWORD` | empty | Optional SMTP authentication credentials. |
@@ -326,6 +354,17 @@ npm run dev
 
 Open `http://localhost:3000`; backend OpenAPI is at `http://localhost:8000/docs`. Set `NEXT_PUBLIC_API_URL` only if the API is hosted somewhere other than the frontend's local default.
 
+#### Validation
+
+Run the deterministic regression suite and frontend static checks with:
+
+```bash
+python -m pytest
+cd frontend && npm run lint && npx tsc --noEmit
+```
+
+Live provider and web-retrieval checks are marked as integration tests and are excluded from the default pytest run. Run them explicitly with `python -m pytest -m integration`; they require provider keys and working search/network access, and may incur API usage.
+
 ### Docker Compose
 
 Install Docker Engine/Desktop with Compose v2. Configure `.env`, especially `JWT_SECRET` and provider keys, then run:
@@ -347,9 +386,35 @@ Caddy exposes ports 80/443; with default `DOMAIN_NAME=:80`, use `http://localhos
 5. Pin dependency and container image versions before a controlled release; Compose currently uses `qdrant/qdrant:latest` and Python requirements use lower bounds.
 6. Validate health, login, upload/index/search, research completion, report access, cancellation, event stream, export, SMTP reset delivery and backup restore in the target environment.
 
-### Optional local Langfuse
+### Local Langfuse setup
 
-Run a self-hosted Langfuse instance separately using its official deployment instructions. Create a project, set `LANGFUSE_ENABLED=true`, project keys, and a reachable `LANGFUSE_OTEL_HOST` in Ada's `.env`; rebuild/restart backend and worker. Langfuse is not bundled in this Compose file.
+Start or stop the separate, local-only Langfuse Docker stack with PowerShell:
+
+```powershell
+.\scripts\langfuse-local.ps1 up
+# Open http://localhost:3002, create a local user and project, then copy its keys to Ada's ignored root .env.
+.\scripts\langfuse-local.ps1 down
+```
+
+Set `LANGFUSE_PUBLIC_KEY` and `LANGFUSE_SECRET_KEY` in Ada's root `.env`; set `LANGFUSE_BASE_URL` to `http://localhost:3002`. Restart the local backend after adding the project keys, then make a fresh, uncached model call and verify the trace in Langfuse. Each new research run creates an `ada.research.run` parent span; model generations share its deterministic trace ID and run session ID. Filter by the session ID shown in Ada's run inspector. Older standalone model observations remain separate because Langfuse does not retroactively change their trace IDs. API credentials and the Langfuse service are not passed into the production `docker-compose.yml`.
+
+To verify local tracing without running a full research workflow, run:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\langfuse_trace_smoke.py
+```
+
+This makes one short model call, prints its run/session ID and Langfuse trace ID without printing the prompt response, and costs a small amount of provider usage. Filter Langfuse by the printed `session_id`; the generation should appear under `ada.research.run`.
+
+### Inspecting a trace
+
+1. Start Ada and the local Langfuse stack, then enable tracing in the local `.env` file.
+2. Start a research run that requires an uncached model call.
+3. In Ada, inspect run progress, model calls, fallback status, and evidence. Open the report and follow a citation to its source.
+4. In Langfuse, filter by the Ada run ID as the session ID. Open `ada.research.run` to inspect its child model-call observations, including model, usage, latency, and errors.
+5. A rate-limited primary provider may produce a degraded call and use the configured fallback; inspect the recorded model and status when reviewing the trace.
+
+The run ID is visible on the run/report page and in Ada's inspector. Langfuse traces can contain the research query and model prompts/results, so use content appropriate for the configured Langfuse environment.
 
 ## 9. Workflow Diagrams
 
@@ -427,7 +492,7 @@ sequenceDiagram
 | Research reports no web sources | Missing/invalid `SERPER_API_KEY`, provider throttling, or searches returned no useful results | Check backend/worker logs and provider quota; set key and rerun with a focused query. |
 | Research stalls or takes too long | Provider timeout/rate limits, too many tracks, worker unavailable, or Redis/Celery misconfiguration | Inspect `docker compose logs -f backend celery_worker redis`; verify Redis health and provider quotas; confirm run status/events and configured budgets. |
 | LLM reports fallback/degraded output | Primary provider failed or malformed output could not be repaired | Inspect run errors and provider credentials/limits; check LiteLLM logs and fallback key. |
-| Langfuse has no traces | Disabled flag, missing credentials, unreachable OTEL host, or no fresh uncached LLM call | Check backend and worker env; use `host.docker.internal` from Docker Desktop; start a new run that invokes a model. Cache hits do not create generations. |
+| Langfuse has no traces | Disabled flag, missing credentials, unreachable Langfuse URL, or no fresh uncached LLM call | Check backend and worker environment; use `host.docker.internal` from Docker Desktop containers; start a new run that invokes a model. Cache hits do not create generations. |
 | Langfuse receives sensitive content | Tracing records model prompts/results when enabled | Disable tracing or configure an appropriately secured/retained Langfuse environment; rotate any exposed credentials. |
 | Vault upload appears but cannot be searched | Processing/indexing failed, wrong user selected/owns document, or vector service unavailable | Check vault status and backend logs; retry reindex; ensure upload and research use the same account and Qdrant is reachable. |
 | Qdrant local store reports locked/unavailable | Another process owns embedded local Qdrant path or path is not writable | Stop duplicate local backend processes, or configure a Qdrant service URL; do not delete data to resolve a lock. |

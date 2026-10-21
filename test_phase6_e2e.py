@@ -6,17 +6,41 @@ import httpx
 from engine.server import app
 from engine.storage.relational_store import RelationalStore
 
-async def test_end_to_end_flow():
+def test_end_to_end_flow():
+    asyncio.run(_test_end_to_end_flow())
+
+
+async def _test_end_to_end_flow():
     print("=== Testing End-to-End Pipeline & Report API ===")
 
     test_run_id = f"test_e2e_{uuid.uuid4().hex[:6]}"
+
+    from engine.auth import create_access_token
+    from engine.database import SessionLocal
+    from engine.models import User
+    test_user_id = str(uuid.uuid4())
+    test_email = f"{test_user_id}@example.test"
+    test_username = f"e2e_{test_user_id[:12]}"
+    db = SessionLocal()
+    try:
+        db.add(User(
+            id=test_user_id,
+            email=test_email,
+            username=test_username,
+            password_hash="test-only",
+        ))
+        db.commit()
+    finally:
+        db.close()
+    token = create_access_token(test_user_id, test_email, test_username)
 
     # 1. Simulate saving full run dossier into PostgreSQL
     print(f"1. Seeding test run in PostgreSQL: {test_run_id}")
     run = RelationalStore.create_run(
         run_id=test_run_id,
         question="What are the commercial silicon recycling yields and economics in 2025?",
-        settings={"depth": "standard", "include_vault": True}
+        settings={"depth": "standard", "include_vault": True},
+        user_id=test_user_id,
     )
     assert run is not None
     assert run.id == test_run_id
@@ -116,7 +140,8 @@ Dual retrieval validates high recovery margins across commercial installations.
     print("6. Testing FastAPI /api/v1/runs/{id}/report and /api/v1/runs/{id}")
     async with httpx.AsyncClient(transport=httpx.ASGITransport(app=app), base_url="http://test") as client:
         # Get run details
-        res_run = await client.get(f"/api/v1/runs/{test_run_id}")
+        auth_headers = {"Authorization": f"Bearer {token}"}
+        res_run = await client.get(f"/api/v1/runs/{test_run_id}", headers=auth_headers)
         assert res_run.status_code == 200, f"Expected 200, got {res_run.status_code}"
         run_data = res_run.json()
         assert run_data["run_id"] == test_run_id
@@ -125,7 +150,7 @@ Dual retrieval validates high recovery margins across commercial installations.
         print("   [OK] GET /api/v1/runs/{id} returned full dossier")
 
         # Get report
-        res_rep = await client.get(f"/api/v1/runs/{test_run_id}/report")
+        res_rep = await client.get(f"/api/v1/runs/{test_run_id}/report", headers=auth_headers)
         assert res_rep.status_code == 200
         rep_data = res_rep.json()
         assert "Commercial Silicon Recycling" in (rep_data.get("report_markdown") or "")
@@ -135,4 +160,4 @@ Dual retrieval validates high recovery margins across commercial installations.
     print("\nALL PHASE 6 END-TO-END TESTS PASSED!")
 
 if __name__ == "__main__":
-    asyncio.run(test_end_to_end_flow())
+    test_end_to_end_flow()

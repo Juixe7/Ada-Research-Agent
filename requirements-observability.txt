@@ -1,0 +1,2 @@
+# Optional, local interview-demo instrumentation. Not installed in deployment.
+langfuse>=4.0.0,<5.0.0

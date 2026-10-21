@@ -110,12 +110,22 @@ def call_gateway(
     result = None
     if run_id:
         try:
+            from engine.celery_app import get_job_state
+            run_state = get_job_state(run_id) or {}
+            deadline_epoch = run_state.get("budget_deadline_epoch")
+            if deadline_epoch and time.time() >= float(deadline_epoch):
+                result = LLMResult(content="", group=group, degraded=True, error="Run time budget reached; no additional model request was sent.")
+        except Exception as deadline_error:
+            print(f"[llm] Deadline check notice: {deadline_error}")
+        try:
             from engine.storage.relational_store import RelationalStore
-            usage = RelationalStore.get_run_usage(run_id)
-            if usage["tokens_in"] + usage["tokens_out"] >= RUN_TOKEN_BUDGET:
-                result = LLMResult(content="", group=group, degraded=True, error=f"Run token budget of {RUN_TOKEN_BUDGET:,} tokens reached.")
-            elif RelationalStore.get_run_cost(run_id) >= RUN_COST_BUDGET_USD:
-                result = LLMResult(content="", group=group, degraded=True, error=f"Run cost budget of ${RUN_COST_BUDGET_USD:.2f} reached.")
+            if result is None:
+                usage = RelationalStore.get_run_usage(run_id)
+                recorded_tokens = usage["tokens_in"] + usage["tokens_out"]
+                if recorded_tokens >= RUN_TOKEN_BUDGET or recorded_tokens + max_tokens > RUN_TOKEN_BUDGET:
+                    result = LLMResult(content="", group=group, degraded=True, error=f"Run token budget of {RUN_TOKEN_BUDGET:,} tokens reached; no additional model request was sent.")
+                elif RelationalStore.get_run_cost(run_id) >= RUN_COST_BUDGET_USD:
+                    result = LLMResult(content="", group=group, degraded=True, error=f"Run cost budget of ${RUN_COST_BUDGET_USD:.2f} reached; no additional model request was sent.")
         except Exception as budget_error:
             print(f"[llm] Budget check notice: {budget_error}")
     if result is None:

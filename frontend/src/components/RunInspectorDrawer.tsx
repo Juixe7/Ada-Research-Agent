@@ -1,7 +1,7 @@
 "use client";
 
 import React, { useState, useEffect } from "react";
-import { X } from "lucide-react";
+import { ArrowLeft, X } from "lucide-react";
 import { API_URL } from "@/lib/config";
 
 type EvidenceSource = {
@@ -25,7 +25,7 @@ interface RunInspectorProps {
   token?: string | null;
   sources?: EvidenceSource[];
   findings?: CriticFinding[];
-  scores?: Record<string, number | null>;
+  scores?: Record<string, number | null | undefined>;
 }
 
 export default function RunInspectorDrawer({
@@ -78,6 +78,15 @@ export default function RunInspectorDrawer({
     return () => controller.abort();
   }, [isOpen, runId, token]);
 
+  useEffect(() => {
+    if (!isOpen) return;
+    const handleKeyDown = (event: KeyboardEvent) => {
+      if (event.key === "Escape") onClose();
+    };
+    window.addEventListener("keydown", handleKeyDown);
+    return () => window.removeEventListener("keydown", handleKeyDown);
+  }, [isOpen, onClose]);
+
   if (!isOpen) return null;
 
   const filteredSources = sources.filter((s) => {
@@ -91,25 +100,38 @@ export default function RunInspectorDrawer({
     .join(" · ");
 
   return (
-    <div className="fixed inset-0 z-50 flex items-center justify-end bg-black/50 backdrop-blur-xs">
-      <div className="w-full max-w-2xl h-full bg-[var(--surface)] border-l border-[var(--line)] shadow-2xl flex flex-col text-[var(--ink)]">
+    <div
+      className="fixed inset-0 z-50 flex items-center justify-end bg-black/50 backdrop-blur-xs"
+      onMouseDown={(event) => {
+        if (event.target === event.currentTarget) onClose();
+      }}
+    >
+      <section
+        role="dialog"
+        aria-modal="true"
+        aria-labelledby="run-inspector-title"
+        className="w-full max-w-2xl h-full bg-[var(--surface)] border-l border-[var(--line)] shadow-2xl flex flex-col text-[var(--ink)]"
+      >
         {/* Header */}
-        <div className="px-6 py-4 border-b border-[var(--line)] bg-[var(--surface-2)] flex items-center justify-between">
-          <div className="flex items-center gap-3">
+        <div className="min-h-16 px-4 sm:px-6 py-3 border-b border-[var(--line)] bg-[var(--surface-2)] flex items-center justify-between gap-3">
+          <div className="flex min-w-0 flex-1 items-center gap-3">
             <span className="w-2 h-2 rounded-full bg-[var(--accent)]" />
-            <h2 className="text-xs font-mono font-semibold uppercase tracking-wider text-[var(--ink)]">
+            <h2 id="run-inspector-title" className="min-w-0 flex-1 truncate text-xs font-mono font-semibold uppercase tracking-wider text-[var(--ink)]">
               Investigation Telemetry & Inspector
             </h2>
-            <span className="text-[11px] font-mono text-[var(--ink-3)]">
+            <span className="hidden max-w-44 shrink-0 truncate text-[11px] font-mono text-[var(--ink-3)] sm:block">
               #{runId}
             </span>
           </div>
           <button
             type="button"
             onClick={onClose}
-            className="p-1 text-[var(--ink-3)] hover:text-[var(--ink)] rounded"
+            aria-label="Back to report and close inspector"
+            title="Back to report"
+            className="inline-flex h-10 shrink-0 items-center gap-2 rounded-md border border-[var(--line)] px-3 text-sm font-medium text-[var(--ink)] transition-colors hover:bg-[var(--surface)] focus-visible:outline-none focus-visible:ring-2 focus-visible:ring-[var(--accent)]"
           >
-            <X className="w-4 h-4" />
+            <ArrowLeft aria-hidden="true" className="h-4 w-4" />
+            <span>Back</span>
           </button>
         </div>
 
@@ -470,7 +492,7 @@ export default function RunInspectorDrawer({
             Close Inspector
           </button>
         </div>
-      </div>
+      </section>
     </div>
   );
 }

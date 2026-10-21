@@ -6,6 +6,12 @@ import re
 from typing import List, Dict, Any, Optional
 
 CITATION_REGEX = re.compile(r'\[(S\d+|D\d+)\]')
+_SENTENCE_SPLIT_REGEX = re.compile(r"(?<=[.!?])\s+(?!\[(?:S\d+|D\d+)\])")
+
+
+def _split_sentences(line: str) -> List[str]:
+    """Split prose while keeping a trailing source tag with its sentence."""
+    return _SENTENCE_SPLIT_REGEX.split(line)
 
 
 def extract_cited_claims(report_markdown: str, evidence_manifest: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -21,7 +27,7 @@ def extract_cited_claims(report_markdown: str, evidence_manifest: List[Dict[str,
             if tags:
                 claims.append({"claim_id": len(claims) + 1, "sentence": stripped, "tags": tags})
             continue
-        for sentence in re.split(r"(?<=[.!?])\s+", line):
+        for sentence in _split_sentences(line):
             tags = list(dict.fromkeys(cid for cid in CITATION_REGEX.findall(sentence) if cid in valid_sources))
             if tags and len(CITATION_REGEX.sub("", sentence).strip()) > 10:
                 claims.append({"claim_id": len(claims) + 1, "sentence": sentence.strip(), "tags": tags})
@@ -62,7 +68,7 @@ def verify_and_ground_citations(
     valid_instances = sum(1 for c in all_citations_found if c in valid_sources)
     # This is a citation-reference validity ratio, not a claim-entailment score.
     # A report with no citations has no measured grounding and must not score 100%.
-    faithfulness_score = (valid_instances / total_found_instances) if total_found_instances > 0 else 0.0
+    citation_validity_score = (valid_instances / total_found_instances) if total_found_instances > 0 else None
 
     # Build interactive citation index for frontend UI
     citation_index = {}
@@ -76,7 +82,7 @@ def verify_and_ground_citations(
             "domain": src.get("domain", "internal"),
             "doc_name": src.get("doc_name"),
             "page_number": src.get("page_number"),
-            "authority_score": src.get("authority_score", 0.7),
+            "authority_score": src.get("authority_score"),
             "snippet": src.get("text", "")[:350]
         }
 
@@ -107,7 +113,7 @@ def verify_and_ground_citations(
                 continue
 
             # For paragraph lines, inspect sentence-by-sentence
-            sentences = re.split(r'(?<=[.!?])\s+', line)
+            sentences = _split_sentences(line)
             kept_sentences = []
             for sent in sentences:
                 sent_cites = CITATION_REGEX.findall(sent)
@@ -160,7 +166,7 @@ def verify_and_ground_citations(
         if not line_citations:
             verified_lines.append(line)
             continue
-        sentences = re.split(r"(?<=[.!?])\s+", line)
+        sentences = _split_sentences(line)
         kept = []
         for sentence in sentences:
             tags = [cid for cid in CITATION_REGEX.findall(sentence) if cid in valid_sources]
@@ -192,7 +198,7 @@ def verify_and_ground_citations(
     return {
         "is_grounded": total_found_instances > 0 and len(hallucinated_ids) == 0,
         "faithfulness_score": entailment_score,
-        "citation_validity_score": round(faithfulness_score, 4) if total_found_instances else None,
+        "citation_validity_score": round(citation_validity_score, 4) if citation_validity_score is not None else None,
         "claims": verified_claims,
         "claims_audited": len(audited),
         "claims_supported": supported,

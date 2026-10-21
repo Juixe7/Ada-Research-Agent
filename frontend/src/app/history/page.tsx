@@ -3,19 +3,16 @@
 import React, { useEffect, useState, useMemo } from "react";
 import { useRouter } from "next/navigation";
 import Link from "next/link";
-import { 
-  Clock, ArrowRight, Search, Globe, Lock, Layers,
-  Check, Filter, ArrowUpDown, ChevronRight, SlidersHorizontal,
-  GitCompare, ExternalLink
-} from "lucide-react";
+import { Clock, Search, GitCompare } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import { API_URL, formatDossierDate } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
+import type { ResearchReportSummary } from "@/lib/api-types";
 
 export default function HistoryArchivePage() {
   const router = useRouter();
   const { token } = useAuth();
-  const [reports, setReports] = useState<any[]>([]);
+  const [reports, setReports] = useState<ResearchReportSummary[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState(false);
   const [searchTerm, setSearchTerm] = useState("");
@@ -32,7 +29,7 @@ export default function HistoryArchivePage() {
         if (!res.ok) throw new Error("Could not load research history");
         return res.json();
       })
-      .then((data) => {
+      .then((data: { reports?: ResearchReportSummary[] }) => {
         if (data.reports) setReports(data.reports);
       })
       .catch((err) => {
@@ -179,7 +176,7 @@ export default function HistoryArchivePage() {
                 </tr>
               ) : (
                 filtered.map((item) => {
-                  const id = item.report_id || item.id;
+                  const id = item.report_id;
                   const isSelected = selectedIds.includes(id);
                   const isCompleted = item.status === "completed";
                   const isFailed = item.status === "failed";

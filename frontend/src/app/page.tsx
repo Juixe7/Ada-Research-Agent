@@ -616,7 +616,7 @@ export default function PublicLandingAndDeskPage() {
             <span>·</span>
             <span>Personal research workspace</span>
           </div>
-          <div className="flex items-center gap-6 font-mono text-[11px]">
+          <div className="flex flex-wrap items-center justify-center gap-x-4 gap-y-2 font-mono text-[11px]">
             {!user && <a href="#features" className="hover:text-[var(--ink)] transition-colors">Features</a>}
             {!user && <a href="#how-it-works" className="hover:text-[var(--ink)] transition-colors">How It Works</a>}
             <Link href="/architecture" className="hover:text-[var(--ink)] transition-colors">Architecture</Link>
@@ -629,6 +629,7 @@ export default function PublicLandingAndDeskPage() {
 
       {/* Screen 7.2: Scoping / Clarification Dialog */}
       <ClarificationModal
+        key={blueprint ? JSON.stringify(blueprint) : "empty-blueprint"}
         isOpen={scopingModalOpen}
         query={query}
         blueprint={blueprint}

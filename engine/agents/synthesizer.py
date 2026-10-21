@@ -47,7 +47,7 @@ def format_evidence_xml(manifest: List[Dict[str, Any]]) -> str:
         sid = ev.get("source_id", "S?")
         stype = ev.get("source_type", "web")
         title = html.escape(ev.get("title", "Untitled Source"))
-        auth = ev.get("authority_score", 0.7)
+        auth = ev.get("authority_score")
 
         if stype == "user_doc":
             dname = html.escape(ev.get("doc_name", "User Doc"))

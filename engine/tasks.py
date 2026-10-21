@@ -5,15 +5,18 @@
 import os
 import concurrent.futures
 import hashlib
+import logging
 import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
+from sqlalchemy.orm import Session
 from engine.agents.planner import generate_research_plan
 from engine.workers.research_worker import execute_sub_research
 from engine.celery_app import celery_app, get_job_state, set_job_state
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DOSSIER_DIR = ROOT_DIR / "dossiers"
+logger = logging.getLogger(__name__)
 
 
 def normalize_and_deduplicate_evidence(raw_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
@@ -60,6 +63,36 @@ def _update_stage(report_id: Optional[str], status: str, stage: str, progress: i
     current["progress"] = progress
     set_job_state(report_id, current)
     return True
+
+
+def _persist_failed_turn(task_db: Session, report_id: str) -> None:
+    """Best-effort persist a failed turn, recovering the session after DB errors."""
+    try:
+        # A preceding failed commit leaves the SQLAlchemy session in a failed
+        # transaction until rollback; rollback is harmless when no txn is active.
+        task_db.rollback()
+        from engine.models import ResearchTurn
+
+        db_turn = task_db.query(ResearchTurn).filter(ResearchTurn.id == report_id).first()
+        if db_turn:
+            db_turn.status = "failed"
+            db_turn.stage = "Research run failed."
+            task_db.commit()
+    except Exception:
+        task_db.rollback()
+        logger.exception("Could not persist failed status for research run %s", report_id)
+
+    try:
+        from engine.storage.relational_store import RelationalStore
+
+        RelationalStore.update_run_status(
+            run_id=report_id,
+            status="failed",
+            stage="Research run failed.",
+            error="Research failed. Check server logs and run telemetry for details.",
+        )
+    except Exception:
+        logger.exception("Could not persist normalized failure status for run %s", report_id)
 
 
 def run_research_pipeline_sync(
@@ -192,6 +225,9 @@ def run_research_pipeline_task(
             blocked_domains=blocked_domains,
         )
 
+        if not (result.get("report_markdown") or "").strip():
+            raise RuntimeError("Research pipeline returned no report content.")
+
         after = get_job_state(report_id)
         if after and after.get("status") == "cancelled":
             return {"status": "cancelled", "report_id": report_id}
@@ -209,27 +245,47 @@ def run_research_pipeline_task(
             "result": result,
             "error": None
         }
-        set_job_state(report_id, completed_state)
-
         db_turn = task_db.query(ResearchTurn).filter(ResearchTurn.id == report_id).first()
-        if db_turn:
-            db_turn.status = "completed"
-            db_turn.progress = 100
-            db_turn.stage = "Completed"
-            db_turn.executive_title = result.get("executive_title") or query[:120]
-            export_paths = result.get("export_paths", {})
-            json_path = export_paths.get("json_path") or export_paths.get("json") or str(DOSSIER_DIR / f"dossier_{report_id}.json")
-            db_turn.report_json_path = json_path
-            task_db.commit()
+        if not db_turn:
+            raise RuntimeError("Research run record disappeared before completion.")
+        db_turn.status = "completed"
+        db_turn.progress = 100
+        db_turn.stage = "Completed"
+        db_turn.executive_title = result.get("executive_title") or query[:120]
+        export_paths = result.get("export_paths", {})
+        json_path = export_paths.get("json_path") or export_paths.get("json") or str(DOSSIER_DIR / f"dossier_{report_id}.json")
+        db_turn.report_json_path = json_path
+        task_db.commit()
+        from engine.storage.relational_store import RelationalStore
+
+        RelationalStore.update_run_status(
+            run_id=report_id,
+            status="completed",
+            stage="Investigation synthesized and verified.",
+            progress=100,
+        )
+        # Publish completion only after the durable turn status is committed.
+        set_job_state(report_id, completed_state)
+        try:
+            from engine.events import publish_event
+
+            publish_event(report_id, "run_completed", {
+                "report_id": report_id,
+                "executive_title": result.get("executive_title") or query,
+                "stage": completed_state["stage"],
+            })
+        except Exception:
+            logger.exception("Could not publish completed event for run %s", report_id)
 
         return {"status": "completed", "report_id": report_id}
 
-    except Exception as e:
+    except Exception:
         current = get_job_state(report_id)
         if current and current.get("status") == "cancelled":
             return {"status": "cancelled", "report_id": report_id}
 
-        print(f"[worker] Error in research job {report_id}: {e}")
+        logger.exception("Research worker failed for run %s", report_id)
+        safe_error = "Research could not be completed. Check server logs and run telemetry for details."
         failed_state = {
             "report_id": report_id,
             "session_id": session_id,
@@ -237,23 +293,19 @@ def run_research_pipeline_task(
             "depth": depth,
             "selected_docs": selected_docs or [],
             "status": "failed",
-            "stage": f"Failed: {str(e)}",
+            "stage": "Research run failed.",
             "progress": 0,
             "result": None,
-            "error": str(e)
+            "error": safe_error,
         }
         set_job_state(report_id, failed_state)
+        _persist_failed_turn(task_db, report_id)
         try:
             from engine.events import publish_event
-            publish_event(report_id, "run_failed", {"error": str(e)})
-        except Exception:
-            pass
 
-        db_turn = task_db.query(ResearchTurn).filter(ResearchTurn.id == report_id).first()
-        if db_turn:
-            db_turn.status = "failed"
-            db_turn.stage = f"Failed: {str(e)}"
-            task_db.commit()
-        return {"status": "failed", "report_id": report_id, "error": str(e)}
+            publish_event(report_id, "run_failed", {"error": safe_error})
+        except Exception:
+            logger.exception("Could not publish failed event for run %s", report_id)
+        return {"status": "failed", "report_id": report_id, "error": safe_error}
     finally:
         task_db.close()

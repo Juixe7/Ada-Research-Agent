@@ -5,9 +5,6 @@
 import json
 import re
 from typing import List, Dict, Any, Optional
-from groq import Groq
-from engine.config import GROQ_API_KEY, GROQ_PLANNER_MODEL
-
 PLANNER_SYSTEM_PROMPT = """You are the Lead Planning Agent of an autonomous deep research engine.
 Your task is to take a macro research query and decompose it into an optimal research plan consisting of 3 to 5 orthogonal sub-questions.
 
@@ -84,7 +81,7 @@ def generate_research_plan(
             "id": 1,
             "category": "technical_core",
             "sub_question": f"What is the current technical state and mechanism of {query}?",
-            "search_queries": [f"{query} overview technical breakdown", f"{query} latest developments 2025 2026"]
+            "search_queries": [f"{query} overview technical breakdown", f"{query} latest developments"]
         },
         {
             "id": 2,
