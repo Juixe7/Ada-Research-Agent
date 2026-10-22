@@ -4,6 +4,7 @@
 
 import json
 import hashlib
+import logging
 import re
 import time
 import requests
@@ -15,6 +16,7 @@ from engine.ingest.web_scraper import scrape_webpage
 from engine.storage.vector_store import get_vector_store
 from engine.budget import ResearchBudget
 
+logger = logging.getLogger(__name__)
 
 _TOKEN_RE = re.compile(r"[\w'-]{3,}")
 
@@ -158,7 +160,7 @@ def calculate_domain_authority(domain: str) -> float:
 def perform_serper_search(query: str, max_results: int = 4) -> List[Dict[str, Any]]:
     """Executes a Google Search via Serper API."""
     if not SERPER_API_KEY:
-        print("[worker] SERPER_API_KEY missing, skipping web search.")
+        logger.warning("SERPER_API_KEY is not configured; skipping web search")
         return []
 
     url = "https://google.serper.dev/search"
@@ -178,8 +180,8 @@ def perform_serper_search(query: str, max_results: int = 4) -> List[Dict[str, An
                     "date": item.get("date", "")
                 })
             return results
-    except Exception as e:
-        print(f"[worker] Serper search error for '{query}': {e}")
+    except Exception:
+        logger.exception("Serper search failed")
     return []
 
 def execute_sub_research(
@@ -212,8 +214,8 @@ def execute_sub_research(
     if include_user_docs:
         try:
             evidence_items.extend(_retrieve_vault_evidence(sub_q, selected_docs, user_id))
-        except Exception as e:
-            print(f"[worker] User doc vector search warning: {e}")
+        except Exception:
+            logger.exception("Vault search failed; continuing without private evidence")
 
     # ── Step 2: Query Live Web via Serper ──
     candidate_urls = []
@@ -337,8 +339,8 @@ def execute_iterative_sub_research(
     if include_user_docs:
         try:
             evidence_items.extend(_retrieve_vault_evidence(sub_q, selected_docs, user_id))
-        except Exception as e:
-            print(f"[research_worker] User doc search notice: {e}")
+        except Exception:
+            logger.exception("Vault search failed; continuing without private evidence")
             warnings.append("Private vault search was unavailable for this track; results may omit selected documents.")
 
     if not SERPER_API_KEY:

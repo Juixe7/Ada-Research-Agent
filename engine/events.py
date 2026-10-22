@@ -3,6 +3,7 @@
 """
 
 import json
+import logging
 import uuid
 import asyncio
 from datetime import datetime, timezone
@@ -12,6 +13,8 @@ from sse_starlette.sse import ServerSentEvent
 
 from engine.celery_app import get_redis_client
 from engine.storage.relational_store import RelationalStore
+
+logger = logging.getLogger(__name__)
 
 # Bounded in-memory fallback queues for local dev and testing when Redis is unavailable
 _LOCAL_EVENT_SUBSCRIBERS: Dict[str, List[tuple[asyncio.AbstractEventLoop, asyncio.Queue]]] = defaultdict(list)
@@ -39,8 +42,8 @@ def publish_event(run_id: str, event_type: str, data: Dict[str, Any]) -> Dict[st
     event_record = None
     try:
         event_record = RelationalStore.record_event(run_id, event_type, data)
-    except Exception as e:
-        print(f"[events] Relational event persist notice: {e}")
+    except Exception:
+        logger.warning("Could not persist event %s for run %s", event_type, run_id)
 
     event_id = str(event_record.id) if event_record else str(uuid.uuid4())
     seq = event_record.seq if event_record else 1
@@ -58,8 +61,8 @@ def publish_event(run_id: str, event_type: str, data: Dict[str, Any]) -> Dict[st
     if r is not None:
         try:
             r.publish(f"ada:events:{run_id}", json.dumps(payload))
-        except Exception as e:
-            print(f"[events] Redis pubsub warning: {e}")
+        except Exception:
+            logger.warning("Could not publish event %s for run %s to Redis", event_type, run_id)
 
     # 3. In-memory Local Queue Distribution
     _LOCAL_EVENT_HISTORY[run_id].append(payload)
@@ -96,8 +99,8 @@ async def run_event_generator(
             )
             if ev.get("event") in ("run_completed", "run_failed", "run_cancelled"):
                 return
-    except Exception as e:
-        print(f"[events] Historical replay notice: {e}")
+    except Exception:
+        logger.warning("Could not load event history for run %s; trying local fallback", run_id)
 
     # Fallback to local memory if DB returned nothing but memory has prior events
     if not replayed_ids and run_id in _LOCAL_EVENT_HISTORY:
@@ -117,7 +120,7 @@ async def run_event_generator(
         if run_info and run_info.get("status") in ("completed", "failed", "cancelled"):
             return
     except Exception:
-        pass
+        logger.warning("Could not read durable status for run %s; keeping event stream open", run_id)
 
     # ── Step 3: Stream Live Events ──
     local_queue: asyncio.Queue = asyncio.Queue()
@@ -147,8 +150,8 @@ async def run_event_generator(
                 yield ServerSentEvent(data=json.dumps(ev["data"]), event=ev["event"], id=event_id)
                 if ev.get("event") in ("run_completed", "run_failed", "run_cancelled"):
                     return
-        except Exception as e:
-            print(f"[events] Concurrent event replay notice: {e}")
+        except Exception:
+            logger.warning("Could not replay new events for run %s", run_id)
         for ev in list(_LOCAL_EVENT_HISTORY.get(run_id, [])):
             event_id = str(ev["id"])
             if event_id in replayed_ids:

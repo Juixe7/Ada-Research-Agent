@@ -2,6 +2,7 @@
 
 """
 
+import logging
 import re
 import uuid
 from datetime import datetime, timezone
@@ -14,6 +15,8 @@ from engine.models import (
     Workspace, Run, Track, Source, Evidence,
     Finding, Report, Claim, Score, LLMCall, Event
 )
+
+logger = logging.getLogger(__name__)
 
 
 class RelationalStore:
@@ -416,6 +419,7 @@ class RelationalStore:
             db.refresh(call)
             return call
         except Exception:
+            logger.exception("Could not persist LLM-call usage for run %s", run_id)
             return None
         finally:
             db.close()
@@ -490,6 +494,7 @@ class RelationalStore:
             db.refresh(event)
             return event
         except Exception:
+            logger.exception("Could not persist event %s for run %s", event_type, run_id)
             return None
         finally:
             db.close()

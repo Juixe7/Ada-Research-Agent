@@ -4,6 +4,7 @@
 
 import concurrent.futures
 import hashlib
+import logging
 import re
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlsplit, urlunsplit
@@ -19,6 +20,8 @@ from engine.export.exporter import export_research_dossier
 from engine.storage.relational_store import RelationalStore
 from engine.events import publish_event
 from engine.config import RESEARCH_CONCURRENCY
+
+logger = logging.getLogger(__name__)
 
 _NASA_PUBLISHER_SUFFIX_RE = re.compile(
     r"\s*(?:\||[-–—])\s*nasa\s+(?:science|jet propulsion laboratory(?:\s*\(jpl\))?|jpl)\s*$",
@@ -45,14 +48,14 @@ def _notify_stage(run_id: Optional[str], status: str, stage: str, progress: int,
     try:
         RelationalStore.update_run_status(run_id=run_id, status=status, stage=stage, progress=progress)
     except Exception:
-        pass
+        logger.exception("Could not persist stage for run %s", run_id)
     try:
         event_payload = {"status": status, "stage": stage, "progress": progress}
         if extra:
             event_payload.update(extra)
         publish_event(run_id, "stage_changed", event_payload)
-    except Exception as e:
-        print(f"[nodes] Publish stage_changed notice: {e}")
+    except Exception:
+        logger.exception("Could not publish stage event for run %s", run_id)
 
 
 def _is_cancelled(run_id: Optional[str]) -> bool:
@@ -184,8 +187,8 @@ def plan_node(state: RunState) -> Dict[str, Any]:
                     "sub_question": track.get("sub_question"),
                     "queries": track.get("search_queries", [])
                 })
-        except Exception as e:
-            print(f"[graph.plan_node] Relational tracks notice: {e}")
+        except Exception:
+            logger.exception("Could not persist planned tracks for run %s", run_id)
 
     return {
         "plan": plan,
@@ -246,8 +249,8 @@ def research_node(state: RunState) -> Dict[str, Any]:
                         research_warnings.append(warning)
                         if run_id:
                             publish_event(run_id, "research_warning", {"track_id": tid, "message": warning})
-            except Exception as e:
-                print(f"[graph.research_node] Track {tid} error: {e}")
+            except Exception:
+                logger.exception("Research track %s failed in run %s", tid, run_id)
                 track_status[tid] = "failed"
                 warning = f"Track {tid}: research failed before evidence could be retrieved."
                 research_warnings.append(warning)
@@ -305,8 +308,8 @@ def research_node(state: RunState) -> Dict[str, Any]:
                 "total_evidence_units": len(all_evidence),
                 "tracks_completed": len([t for t in track_status.values() if t == "completed"])
             })
-        except Exception as e:
-            print(f"[graph.research_node] Relational evidence notice: {e}")
+        except Exception:
+            logger.exception("Could not persist evidence for run %s", run_id)
 
     return {
         "evidence_manifest": all_evidence,
@@ -353,8 +356,8 @@ def critic_node(state: RunState) -> Dict[str, Any]:
                     "claim_b": c.get("claim_b"),
                     "round": current_round
                 })
-        except Exception as e:
-            print(f"[graph.critic_node] Relational findings notice: {e}")
+        except Exception:
+            logger.exception("Could not persist critic findings for run %s", run_id)
 
     return {
         "critic_findings": critic_audit,
@@ -406,8 +409,8 @@ def arbiter_node(state: RunState) -> Dict[str, Any]:
     if run_id:
         try:
             RelationalStore.save_sources_and_evidence(run_id, clean_evidence)
-        except Exception as e:
-            print(f"[graph.arbiter_node] Relational save notice: {e}")
+        except Exception:
+            logger.exception("Could not persist arbiter evidence for run %s", run_id)
 
     return {
         "evidence_manifest": clean_evidence,
@@ -544,8 +547,8 @@ def score_node(state: RunState) -> Dict[str, Any]:
                     "research_budget": state.get("resource_budget").snapshot() if state.get("resource_budget") else None,
                 }
             )
-        except Exception as e:
-            print(f"[graph.score_node] Relational score notice: {e}")
+        except Exception:
+            logger.exception("Could not persist evaluation scores for run %s", run_id)
 
     return {"scores": scores}
 
@@ -600,7 +603,7 @@ def finalize_node(state: RunState) -> Dict[str, Any]:
             # The worker owns the terminal transition after it has validated
             # the artifact and committed the durable session turn.
             _notify_stage(run_id, "exporting", "Final report saved; confirming run status...", 99)
-        except Exception as e:
-            print(f"[graph.finalize_node] Relational finalize notice: {e}")
+        except Exception:
+            logger.exception("Could not finalize relational records for run %s", run_id)
 
     return {"export_paths": export_paths, "warnings": warnings}

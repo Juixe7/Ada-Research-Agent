@@ -81,7 +81,7 @@ def run_research_pipeline_sync(
     from engine.graph.pipeline import execute_graph_pipeline
     from engine.storage.relational_store import RelationalStore
 
-    print(f"\n[pipeline] Starting LangGraph Research Pipeline for: '{query}' (depth={depth})")
+    logger.info("Starting research pipeline for run %s (depth=%s)", report_id, depth)
 
     # Initialize run record in relational database
     if report_id:
@@ -93,8 +93,8 @@ def run_research_pipeline_sync(
                 run_id=report_id,
                 plan=[]
             )
-        except Exception as e:
-            print(f"[pipeline] Relational run init notice: {e}")
+        except Exception:
+            logger.exception("Could not initialize relational run record %s", report_id)
 
     # Execute compiled LangGraph StateGraph
     final_state = execute_graph_pipeline(

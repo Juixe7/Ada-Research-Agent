@@ -3,6 +3,7 @@
 """
 
 from __future__ import annotations
+import logging
 import json
 from typing import Dict, Any, Optional
 try:
@@ -10,6 +11,8 @@ try:
 except ImportError:
     redis = None
 from engine.config import REDIS_URL
+
+logger = logging.getLogger(__name__)
 try:
     from celery import Celery
     # Initialize Celery application backed by Redis broker and result backend
@@ -74,9 +77,10 @@ def get_redis_client() -> Optional[redis.Redis]:
         client = redis.from_url(REDIS_URL, decode_responses=True, socket_connect_timeout=1.5, socket_timeout=1.5)
         client.ping()
         _redis_client = client
-        print(f"[redis] Connected to Redis job state store at {REDIS_URL}")
+        logger.info("Connected to Redis job state store")
         return _redis_client
     except Exception:
+        logger.warning("Redis is unavailable; using process-local job state")
         return None
 
 
@@ -103,8 +107,8 @@ def set_job_state(report_id: str, state: Dict[str, Any]) -> None:
     if r is not None:
         try:
             r.setex(f"ada:job:{report_id}", JOB_TTL_SECONDS, json.dumps(state))
-        except Exception as e:
-            print(f"[redis] Warning: failed to write job state for {report_id}: {e}")
+        except Exception:
+            logger.warning("Could not write job state for run %s", report_id)
 
 
 def get_job_state(report_id: str) -> Optional[Dict[str, Any]]:
@@ -118,7 +122,7 @@ def get_job_state(report_id: str) -> Optional[Dict[str, Any]]:
             raw = r.get(f"ada:job:{report_id}")
             if raw:
                 return json.loads(raw)
-        except Exception as e:
-            print(f"[redis] Warning: failed to read job state for {report_id}: {e}")
+        except Exception:
+            logger.warning("Could not read job state for run %s; using local fallback", report_id)
 
     return _LOCAL_JOBS_CACHE.get(report_id)
