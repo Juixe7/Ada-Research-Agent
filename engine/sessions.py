@@ -5,15 +5,14 @@
 import json
 from pathlib import Path
 from datetime import datetime, timezone
-from typing import List, Optional, Dict, Any
-from fastapi import APIRouter, Depends, HTTPException, status
+from typing import Optional, Dict, Any
+from fastapi import APIRouter, Depends, HTTPException
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from engine.database import get_db
 from engine.auth import get_current_user, get_optional_user
 from engine.models import User, ResearchSession, ResearchTurn
-from engine.agents.evidence_delta import condense_session_turns
 from engine.report_artifacts import has_persisted_report_artifact
 
 sessions_router = APIRouter(prefix="/api/sessions", tags=["sessions"])

@@ -7,7 +7,7 @@ import json
 import re
 import logging
 from typing import Optional, Dict, Any, List, Type
-from pydantic import BaseModel, ValidationError
+from pydantic import BaseModel
 
 import litellm
 from packages.llm_gateway.models import LLMResult, TokenUsage, ModelGroup

@@ -2,7 +2,6 @@
 
 """
 
-import json
 import re
 import uuid
 from datetime import datetime, timezone
@@ -13,7 +12,7 @@ from sqlalchemy import desc
 from engine.database import SessionLocal
 from engine.models import (
     Workspace, Run, Track, Source, Evidence,
-    Finding, Report, Claim, Score, Memory, LLMCall, Event
+    Finding, Report, Claim, Score, LLMCall, Event
 )
 
 

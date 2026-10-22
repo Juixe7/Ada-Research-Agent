@@ -2,12 +2,8 @@
 
 """
 
-import os
-import re
 import html
 from typing import List, Dict, Any, Optional
-import google.generativeai as genai
-from engine.config import GEMINI_API_KEY, GEMINI_SYNTHESIS_MODEL
 
 SYNTHESIZER_SYSTEM_INSTRUCTION = """You are the Chief Intelligence Analyst and Synthesizer of Ada Deep Research.
 Your objective is to craft an exhaustive, publication-grade, deeply analytical research dossier on the requested topic.

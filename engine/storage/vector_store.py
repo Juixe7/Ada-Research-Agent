@@ -2,7 +2,6 @@
 
 """
 
-import os
 import uuid
 import threading
 from typing import List, Dict, Any, Optional

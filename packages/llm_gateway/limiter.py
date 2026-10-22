@@ -5,7 +5,7 @@
 import time
 import threading
 import random
-from typing import Optional, Dict
+from typing import Dict
 
 class TokenBucketLimiter:
     """

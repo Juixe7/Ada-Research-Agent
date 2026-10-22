@@ -2,7 +2,7 @@
 
 """
 
-from typing import Optional, Dict, Any, Literal
+from typing import Optional, Any, Literal
 from pydantic import BaseModel, Field
 
 ModelGroup = Literal["small", "large", "write", "judge"]

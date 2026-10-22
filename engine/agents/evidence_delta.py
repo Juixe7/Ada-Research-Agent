@@ -3,10 +3,7 @@
 """
 
 import json
-import re
-from typing import List, Dict, Any, Optional
-from groq import Groq
-from engine.config import GROQ_API_KEY, GROQ_PLANNER_MODEL
+from typing import List, Dict, Any
 
 CONDENSATION_SYSTEM_PROMPT = """You are the Evidence-Delta Memory Agent of Ada Deep Research.
 Your role is to maintain continuous, high-efficiency research state across multi-turn investigations without blowing prompt token limits.

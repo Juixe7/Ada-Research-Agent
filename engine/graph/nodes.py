@@ -2,13 +2,12 @@
 
 """
 
-import os
 import concurrent.futures
 import hashlib
 import re
 from typing import Dict, Any, List, Optional
 from urllib.parse import urlsplit, urlunsplit
-from engine.graph.state import RunState, SectionSpec
+from engine.graph.state import RunState
 from engine.celery_app import get_job_state, set_job_state
 from engine.agents.planner import generate_research_plan
 from engine.workers.research_worker import execute_iterative_sub_research, execute_sub_research

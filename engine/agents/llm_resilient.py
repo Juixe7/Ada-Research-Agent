@@ -3,14 +3,11 @@
 """
 
 import time
-import json
 import threading
 from typing import Optional, Dict, Any, List, Type
 from pydantic import BaseModel
 
 from engine.config import (
-    GROQ_API_KEY,
-    GEMINI_API_KEY,
     REDIS_URL,
     LLM_GROUPS,
     LLM_DEFAULT_RPM,

@@ -17,14 +17,14 @@ from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
 import bcrypt
 import jwt
-from fastapi import APIRouter, Depends, HTTPException, status, Header
+from fastapi import APIRouter, Depends, HTTPException, status
 from fastapi.security import HTTPBearer, HTTPAuthorizationCredentials
 from pydantic import BaseModel, EmailStr, Field
 from sqlalchemy.orm import Session
 
 from engine.config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRY_DAYS
 from engine.database import get_db
-from engine.models import User, ResearchSession, ResearchTurn, VaultDocument, PasswordResetToken
+from engine.models import User, ResearchSession, VaultDocument, PasswordResetToken
 
 auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 security = HTTPBearer(auto_error=False)

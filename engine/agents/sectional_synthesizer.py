@@ -2,7 +2,6 @@
 
 """
 
-import re
 import html
 from typing import List, Dict, Any, Optional
 from engine.agents.llm_resilient import call_gateway
