@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect, useRef, use, useCallback } from "react";
+import { useState, useEffect, useRef, use, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, AlertTriangle, ChevronDown,

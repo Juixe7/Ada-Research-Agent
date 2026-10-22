@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState } from "react";
+import { useState } from "react";
 import { ArrowRight, Check, X, CornerDownRight } from "lucide-react";
 import type { ResearchBlueprint } from "@/lib/api-types";
 

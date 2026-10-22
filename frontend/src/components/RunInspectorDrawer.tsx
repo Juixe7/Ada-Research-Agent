@@ -1,6 +1,6 @@
 "use client";
 
-import React, { useState, useEffect } from "react";
+import { useState, useEffect } from "react";
 import { ArrowLeft, X } from "lucide-react";
 import { API_URL } from "@/lib/config";
 
