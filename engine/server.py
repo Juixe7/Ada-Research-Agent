@@ -44,7 +44,6 @@ from engine.schemas.requests import (
     AddendumRequest,
     PasteDocRequest,
     PreflightRequest,
-    QuerySelectionRequest,
     QuerySourceRequest,
     ReportFollowupRequest,
     ResearchRequest,
@@ -260,20 +259,6 @@ async def stream_run_events(
             client_request=request
         ),
         ping=15
-    )
-
-
-@app.post("/api/report/{report_id}/query-selection")
-def query_selection(report_id: str, req: QuerySelectionRequest, user: Optional[User] = Depends(get_optional_user), db: Session = Depends(get_db)):
-    """
-    Compatibility route for the inline selection UI. It shares the same saved-evidence
-    retrieval and verification path as report follow-ups.
-    """
-    return query_report_evidence(
-        report_id,
-        ReportFollowupRequest(question=req.question, selected_text=req.selected_text),
-        user,
-        db,
     )
 
 

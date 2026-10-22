@@ -268,7 +268,6 @@ All paths below are relative to the backend origin (default `http://localhost:80
 
 | Method and path | Request | Success response / behavior | Common statuses |
 |---|---|---|---|
-| `POST /api/report/{report_id}/query-selection` | `{selected_text,question}` | Answer about selected report text using saved report evidence | 200; 404 private/missing; 422 |
 | `POST /api/report/{report_id}/query-evidence` | `{question,selected_text?}` | Evidence-grounded follow-up; may report insufficient saved evidence | 200; 404; 422 |
 | `POST /api/report/{report_id}/addendum` | `{inquiry,selected_text?,context?}` | Starts a focused addendum investigation | 200; 404; 422 |
 | `POST /api/report/{report_id}/query-source` | `{source_id,question}` | Answer constrained to one report source | 200; 404; 422 |

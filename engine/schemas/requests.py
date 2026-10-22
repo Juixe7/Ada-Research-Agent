@@ -35,13 +35,6 @@ class PasteDocRequest(BaseModel):
     text: str = Field(..., min_length=1, max_length=20 * 1024 * 1024)
 
 
-class QuerySelectionRequest(BaseModel):
-    """Selected report text plus a question about it."""
-
-    selected_text: str = Field(..., min_length=1, max_length=500)
-    question: str = Field(..., min_length=1, max_length=1000)
-
-
 class ReportFollowupRequest(BaseModel):
     """Evidence-grounded follow-up question for a completed report."""
 
@@ -55,9 +48,6 @@ class AddendumRequest(BaseModel):
     inquiry: str = Field(..., min_length=1, max_length=1000)
     selected_text: Optional[str] = Field("", max_length=500)
     context: Optional[str] = Field("", max_length=2000)
-
-
-SubInvestigationRequest = AddendumRequest
 
 
 class QuerySourceRequest(BaseModel):

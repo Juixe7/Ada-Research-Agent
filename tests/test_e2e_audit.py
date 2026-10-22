@@ -187,17 +187,17 @@ def run_all_audit_tests():
     assert blocked_scrape["method"] == "blocked_ssrf_guard"
     print("  ✓ Path traversal & SSRF protections (loopback, RFC1918, AWS IMDS 169.254.169.254) verified.")
 
-    # 7. Inline Assistant Resilient Endpoint Check (BUG-06)
-    print("\n[7/7] Verifying Existing Dossier & Inline Assistant Endpoint...")
+    # 7. Evidence-grounded report follow-up check (BUG-06)
+    print("\n[7/7] Verifying Existing Dossier & Evidence Follow-up Endpoint...")
     reports_public = client.get(f"{base_url}/api/reports").json().get("reports", [])
     if reports_public:
         rid = reports_public[0]["report_id"]
-        q_sel = client.post(
-            f"{base_url}/api/report/{rid}/query-selection",
+        followup = client.post(
+            f"{base_url}/api/report/{rid}/query-evidence",
             json={"selected_text": "Multi-agent research architecture", "question": "What does this mean?"}
         )
-        assert q_sel.status_code == 200 and q_sel.json().get("answer"), f"query-selection failed: {q_sel.text}"
-        print(f"  ✓ Inline assistant (/query-selection) responded cleanly ({len(q_sel.json()['answer'])} chars).")
+        assert followup.status_code == 200 and followup.json().get("answer"), f"query-evidence failed: {followup.text}"
+        print(f"  ✓ Evidence follow-up (/query-evidence) responded cleanly ({len(followup.json()['answer'])} chars).")
     else:
         print("  ✓ Skipped live dossier inline check (no existing public dossier on disk).")
 
