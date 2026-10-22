@@ -2,16 +2,16 @@
 
 from __future__ import annotations
 
-from typing import Any, Callable
+from typing import Any
 
-from fastapi import APIRouter, Depends, HTTPException
+from fastapi import APIRouter, Depends
 from pydantic import BaseModel, Field
 from sqlalchemy.orm import Session
 
 from engine.auth import get_current_user, get_optional_user
 from engine.database import get_db
 from engine.models import User
-from engine.services.errors import ServiceError
+from engine.http_errors import run_service_operation as _run_service_operation
 from engine.services.sessions import ResearchSessionService
 
 sessions_router = APIRouter(prefix="/api/sessions", tags=["sessions"])
@@ -28,14 +28,6 @@ class UpdateSessionRequest(BaseModel):
     """Validated replacement title for a research session."""
 
     title: str = Field(..., min_length=1, max_length=255)
-
-
-def _run_service_operation(operation: Callable[..., Any], *args: Any) -> Any:
-    """Translate expected service errors to HTTP responses at the route boundary."""
-    try:
-        return operation(*args)
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 @sessions_router.get("")

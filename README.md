@@ -98,6 +98,7 @@ The current implementation is a modular monolith with a separately runnable work
 │   ├── celery_app.py       # Queue configuration and job-state storage
 │   ├── database.py         # SQLAlchemy engine/session lifecycle
 │   ├── events.py           # Run event publication and SSE generator
+│   ├── http_errors.py      # Maps expected service failures to HTTP responses
 │   ├── models.py           # SQLAlchemy entities
 │   ├── server.py           # FastAPI application and research/report/vault endpoints
 │   ├── sessions.py         # Session and turn endpoints
@@ -122,6 +123,7 @@ The current implementation is a modular monolith with a separately runnable work
 | Package/module | Responsibility and key interface |
 |---|---|
 | `engine.server` | FastAPI routes; validates inputs and checks private resource access before reads/writes. |
+| `engine.http_errors` | Translates expected `ServiceError` failures at API boundaries; unexpected exceptions propagate for normal server error reporting. |
 | `engine.services.research_runs` | Creates owned sessions/turns, tracks live jobs, dispatches workers, and resolves cancellation/status fallbacks. |
 | `engine.services.preflight` | Resolves only the user's selected private documents before query scoping. |
 | `engine.services.report_followups` | Answers from saved evidence, verifies citations, and persists focused addenda. |

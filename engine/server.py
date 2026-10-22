@@ -2,7 +2,7 @@
 
 import re
 from pathlib import Path
-from typing import Any, Callable, Dict, Optional
+from typing import Any, Dict, Optional
 from fastapi import FastAPI, HTTPException, UploadFile, File, BackgroundTasks, Depends, Request, Query
 from fastapi.middleware.cors import CORSMiddleware
 from fastapi.responses import FileResponse
@@ -27,10 +27,10 @@ from engine.sessions import sessions_router
 from engine.agents.evidence_delta import condense_session_turns, format_delta_planning_context
 from engine.services.reports import ReportService
 from engine.services.report_followups import ReportFollowupService
-from engine.services.errors import ServiceError
 from engine.services.research_runs import ResearchRunCommand, ResearchRunService
 from engine.services.preflight import PreflightCommand, PreflightService
 from engine.services.vault import VaultService
+from engine.http_errors import run_service_operation as _run_service_operation
 from engine.schemas.vault import (
     VaultDeleteResponse,
     VaultListResponse,
@@ -73,14 +73,6 @@ DOSSIER_DIR.mkdir(parents=True, exist_ok=True)
 MAX_ACTIVE_JOBS = 30
 vault_service = VaultService()
 preflight_service = PreflightService()
-
-
-def _run_service_operation(operation: Callable[..., Any], *args: Any, **kwargs: Any) -> Any:
-    """Translate expected application-service failures into HTTP responses."""
-    try:
-        return operation(*args, **kwargs)
-    except ServiceError as exc:
-        raise HTTPException(status_code=exc.status_code, detail=exc.detail) from exc
 
 
 # In-memory status registry for active research jobs
