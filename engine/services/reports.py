@@ -187,8 +187,8 @@ class ReportService:
                             preview_data = json.load(report_file)
                     except Exception as exc:
                         logger.debug("Unable to read report preview %s: %s", turn.id, exc)
-                status = turn.status
-                stage = turn.stage
+                status = turn.status or "unknown"
+                stage = turn.stage or "Status unavailable"
                 if status == "completed" and not self.has_artifact(turn.id, turn.report_json_path):
                     status = "failed"
                     stage = "Report unavailable"
@@ -199,12 +199,12 @@ class ReportService:
                     "executive_title": turn.executive_title or preview_data.get("executive_title") or turn.query,
                     "status": status,
                     "depth": preview_data.get("depth", "standard"),
-                    "progress": turn.progress,
+                    "progress": turn.progress if turn.progress is not None else 0,
                     "stage": stage,
                     "faithfulness_score": preview_data.get("faithfulness_score"),
                     "coverage_score": preview_data.get("coverage_score"),
                     "total_sources_cited": preview_data.get("total_sources_cited", 0),
-                    "is_public": turn.is_public,
+                    "is_public": bool(turn.is_public),
                     "created_at": turn.created_at.isoformat() if turn.created_at else datetime.now(timezone.utc).isoformat(),
                 })
             return {"reports": reports}
@@ -214,8 +214,8 @@ class ReportService:
                 with report_path.open("r", encoding="utf-8") as report_file:
                     report_data = json.load(report_file)
                 report_id = report_data.get("report_id")
-                turn = db.query(ResearchTurn).filter(ResearchTurn.id == report_id).first() if report_id else None
-                if not turn or not turn.is_public or turn.status != "completed":
+                public_turn = db.query(ResearchTurn).filter(ResearchTurn.id == report_id).first() if report_id else None
+                if not public_turn or not public_turn.is_public or public_turn.status != "completed":
                     continue
                 reports.append({
                     "report_id": report_id,

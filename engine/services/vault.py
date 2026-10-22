@@ -365,7 +365,7 @@ class VaultService:
                 summaries.append({
                     "doc_name": document.doc_name,
                     "filename": document.doc_name,
-                    "size_kb": round(document.file_size / 1024, 1),
+                    "size_kb": round((document.file_size or 0) / 1024, 1),
                     "uploaded_at": document.uploaded_at.timestamp() if document.uploaded_at else 0,
                     "chunk_count": chunk_count,
                     "index_status": "searchable" if chunk_count > 0 else "not_indexed",
