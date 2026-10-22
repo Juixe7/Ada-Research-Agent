@@ -3,8 +3,6 @@
 import React, { useState, useEffect, useRef, use, useMemo, useCallback } from "react";
 import Link from "next/link";
 import { useRouter } from "next/navigation";
-import ReactMarkdown from "react-markdown";
-import remarkGfm from "remark-gfm";
 import {
   ArrowLeft, Check, Copy, ExternalLink, Printer,
   ShieldCheck, AlertTriangle, X, Share2,
@@ -13,6 +11,7 @@ import {
 import Navbar from "@/components/Navbar";
 import RunInspectorDrawer from "@/components/RunInspectorDrawer";
 import ReportEvidencePanel from "@/components/report/ReportEvidencePanel";
+import ReportMonograph from "@/components/report/ReportMonograph";
 import { API_URL, formatDossierDate } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
 import { useReportFollowups } from "@/hooks/useReportFollowups";
@@ -21,8 +20,6 @@ import {
   buildReportChapters,
   buildReportSources,
   getReportWarnings,
-  headingSlug,
-  headingText,
 } from "@/lib/report-content";
 import type { CitationDetails, ReportData } from "@/lib/report-types";
 
@@ -307,13 +304,6 @@ export default function ReportReaderPage({
   const citationValidity = report.citation_validity_score ?? report.guard_results?.citation_validity_score ?? null;
   const runWarnings = getReportWarnings(report);
 
-  // Text size class mapping
-  const textSizeClasses = {
-    S: "text-[15px] leading-[1.65]",
-    M: "text-[18px] leading-[1.68]",
-    L: "text-[20px] leading-[1.72]",
-  };
-
   return (
     <div className="min-h-screen bg-[var(--paper)] text-[var(--ink)] flex flex-col font-sans selection:bg-[var(--accent-soft)]">
       {/* ─── Reading Progress Bar (Fixed Top hairline) ───────────────── */}
@@ -512,91 +502,11 @@ export default function ReportReaderPage({
             </aside>
           )}
 
-          {/* Monograph Body rendered with Markdown & Citations */}
-          <div className={`font-serif ${textSizeClasses[textSize]} text-[var(--ink)] leading-[1.68] space-y-6 monograph-prose`}>
-            <ReactMarkdown
-              remarkPlugins={[remarkGfm]}
-              components={{
-                h2: ({ children }) => {
-                  const titleText = headingText(children);
-                  return (
-                    <h2
-                      id={headingSlug(titleText)}
-                      className="relative font-serif text-[24px] font-semibold text-[var(--ink)] pt-10 pb-2 mt-8 border-t border-[var(--line)] scroll-mt-16 leading-snug"
-                    >
-                      {children}
-                    </h2>
-                  );
-                },
-                h3: ({ children }) => (
-                  <h3 className="font-serif text-[19px] font-semibold text-[var(--ink)] pt-6 pb-1 leading-snug">
-                    {children}
-                  </h3>
-                ),
-                p: ({ children }) => {
-                  return (
-                    <p className="my-4 leading-[1.68]">
-                      {React.Children.map(children, (child) => {
-                        if (typeof child === "string") {
-                          // Match inline citation tags like [S1], [D2]
-                          const parts = child.split(/(\[(?:S|D)?\d+\])/g);
-                          return parts.map((part, pIdx) => {
-                            const match = part.match(/^\[((?:S|D)?\d+)\]$/);
-                            if (match) {
-                              const tag = match[1];
-                              return (
-                                <button
-                                  key={pIdx}
-                                  type="button"
-                                  onClick={() => handleCitationClick(tag)}
-                                  className="citation-badge"
-                                  title={`View citation [${tag}]`}
-                                >
-                                  [{tag}]
-                                </button>
-                              );
-                            }
-
-                            return part;
-                          });
-                        }
-                        return child;
-                      })}
-                    </p>
-                  );
-                },
-                blockquote: ({ children }) => (
-                  <blockquote className="border-l-2 border-[var(--accent)] pl-4 py-1 my-6 font-serif italic text-[var(--ink-2)] bg-transparent">
-                    {children}
-                  </blockquote>
-                ),
-                table: ({ children }) => (
-                  <div className="my-8 overflow-x-auto border border-[var(--line)] rounded-[6px] bg-[var(--surface)]">
-                    <table className="w-full text-left font-sans text-xs">
-                      {children}
-                    </table>
-                  </div>
-                ),
-                thead: ({ children }) => (
-                  <thead className="bg-[var(--surface-2)] font-mono text-[11px] uppercase text-[var(--ink-3)] border-b border-[var(--line)]">
-                    {children}
-                  </thead>
-                ),
-                th: ({ children }) => (
-                  <th className="py-2.5 px-3.5 font-semibold text-[var(--ink-2)]">
-                    {children}
-                  </th>
-                ),
-                td: ({ children }) => (
-                  <td className="py-2.5 px-3.5 border-t border-[var(--line)] font-mono text-[12px] text-[var(--ink)]">
-                    {children}
-                  </td>
-                ),
-              }}
-            >
-              {markdownContent}
-            </ReactMarkdown>
-          </div>
+          <ReportMonograph
+            markdown={markdownContent}
+            textSize={textSize}
+            onCitationClick={handleCitationClick}
+          />
 
           {/* ─── Screen 7.5 Docked Follow-Up Panel ─────────────────────── */}
           <section className="pt-12 border-t border-[var(--line)] space-y-4 no-print">
