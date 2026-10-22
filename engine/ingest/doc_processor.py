@@ -391,7 +391,7 @@ def process_raw_text_document(raw_text: str, doc_name: str = "User Pasted Docume
     if not raw_text or not raw_text.strip():
         return []
 
-    all_chunks = []
+    all_chunks: List[Dict[str, Any]] = []
     for chunk in chunk_text_with_metadata(raw_text.strip(), chunk_size=1200, overlap=150):
         chunk_text_value = chunk["text"]
         all_chunks.append(DocumentChunk(

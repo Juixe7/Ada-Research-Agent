@@ -136,13 +136,14 @@ def export_research_dossier(
 
     # 2. Export Structured JSON
     json_filename = DOSSIER_DIR / f"dossier_{rid}.json"
+    coverage_score = (scores or {}).get("coverage")
     full_payload = {
         "report_id": rid,
         "query": query,
         "executive_title": exec_title,
         "faithfulness_score": guard_results.get("faithfulness_score"),
         "citation_validity_score": guard_results.get("citation_validity_score"),
-        "coverage_score": round((scores or {}).get("coverage") * 100) if (scores or {}).get("coverage") is not None else None,
+        "coverage_score": round(float(coverage_score) * 100) if coverage_score is not None else None,
         "scores": scores or {},
         "guard_results": guard_results,
         "claims": guard_results.get("claims", []),

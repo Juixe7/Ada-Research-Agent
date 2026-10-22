@@ -104,9 +104,10 @@ def generate_outline(
         # Keep track sections grounded in their own evidence. Randomly allocating
         # other tracks' sources creates plausible but irrelevant findings.
         assigned = [
-            e.get("source_id")
+            str(e.get("source_id"))
             for e in evidence_manifest
-            if str(tid) in {str(x) for x in (e.get("track_ids") or ([e.get("track_id")] if e.get("track_id") else []))}
+            if e.get("source_id") is not None
+            and str(tid) in {str(x) for x in (e.get("track_ids") or ([e.get("track_id")] if e.get("track_id") else []))}
         ]
 
         outline.append({

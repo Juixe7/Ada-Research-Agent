@@ -38,8 +38,8 @@ class AdaVectorStore:
         logger.info("Loading document embedding model %s", EMBEDDING_MODEL_NAME)
         self.embed_model = TextEmbedding(model_name=EMBEDDING_MODEL_NAME)
 
-        # Initialize Qdrant Client (Remote HTTP/Cloud -> Local disk -> In-memory fallback)
-        self.client = None
+        # Prefer the configured service and fall back to durable local storage.
+        client: Optional[QdrantClient] = None
         if QDRANT_URL:
             try:
                 logger.info("Connecting to configured Qdrant service")
@@ -49,14 +49,14 @@ class AdaVectorStore:
                     timeout=10,
                 )
                 candidate.get_collections()
-                self.client = candidate
+                client = candidate
             except Exception:
                 logger.warning("Qdrant service is unavailable; trying local persistent storage")
 
-        if self.client is None:
+        if client is None:
             Path(QDRANT_STORAGE_PATH).mkdir(parents=True, exist_ok=True)
             try:
-                self.client = QdrantClient(path=QDRANT_STORAGE_PATH)
+                client = QdrantClient(path=QDRANT_STORAGE_PATH)
             except Exception as e:
                 raise RuntimeError(
                     f"Persistent Qdrant storage at '{QDRANT_STORAGE_PATH}' is unavailable or locked. "
@@ -64,6 +64,7 @@ class AdaVectorStore:
                     "Ada will not silently use an empty in-memory index."
                 ) from e
 
+        self.client: QdrantClient = client
         self._ensure_collection()
 
     def _ensure_collection(self):
@@ -203,7 +204,7 @@ class AdaVectorStore:
             models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id)),
             models.FieldCondition(key="source_type", match=models.MatchValue(value="user_doc")),
         ])
-        old_point_ids = []
+        old_point_ids: List[str | int] = []
         offset = None
         while True:
             page, offset = self.client.scroll(

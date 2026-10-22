@@ -38,10 +38,10 @@ jobs:
           python -m pip install ruff==0.17.1
           ruff check --select F .
 
-      - name: Type-check backend services
+      - name: Type-check backend
         run: |
           python -m pip install mypy==2.4.0
-          mypy engine/services --ignore-missing-imports --follow-imports=silent --check-untyped-defs
+          mypy engine --ignore-missing-imports --follow-imports=silent --check-untyped-defs
 
       - name: Run E2E Functional & Security Test Suite
         env:

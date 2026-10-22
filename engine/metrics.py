@@ -22,8 +22,11 @@ def calculate_research_metrics(
     track_ids = [str(track.get("id", "")) for track in plan]
     track_scores: Dict[str, float] = {}
     for track_id in track_ids:
+        raw_score = relevance_result.get(track_id, {}).get("score")
+        if raw_score is None:
+            continue
         try:
-            value = float(relevance_result.get(track_id, {}).get("score"))
+            value = float(raw_score)
         except (TypeError, ValueError):
             continue
         if 0.0 <= value <= 1.0:

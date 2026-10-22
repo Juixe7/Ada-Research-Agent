@@ -114,8 +114,8 @@ def normalize_and_deduplicate_evidence(raw_list: List[Dict[str, Any]]) -> List[D
             key = f"content::{content_hash}" if content_hash else f"web::{canonical_url}" if canonical_url else f"title::{item.get('title', '')[:40]}"
             title_fingerprint = _web_title_fingerprint(item.get("title", ""))
             title_key = title_fingerprint if len(title_fingerprint.split()) >= 6 else ""
-            existing = seen_keys.get(key) or (seen_web_titles.get(title_key) if title_key else None)
-            if not existing:
+            web_existing = seen_keys.get(key) or (seen_web_titles.get(title_key) if title_key else None)
+            if not web_existing:
                 item["source_id"] = f"S{web_idx}"
                 item["track_ids"] = list(dict.fromkeys([str(item.get("track_id", ""))] if item.get("track_id") else []))
                 web_idx += 1
@@ -124,12 +124,12 @@ def normalize_and_deduplicate_evidence(raw_list: List[Dict[str, Any]]) -> List[D
                     seen_web_titles[title_key] = item
                 clean_list.append(item)
             else:
-                if existing and item.get("track_id"):
-                    existing["track_ids"] = list(dict.fromkeys([*(existing.get("track_ids") or []), str(item["track_id"])]))
-                if existing and item.get("url") and item.get("url") != existing.get("url"):
-                    existing.setdefault("alternate_source_urls", [])
-                    if item["url"] not in existing["alternate_source_urls"]:
-                        existing["alternate_source_urls"].append(item["url"])
+                if web_existing and item.get("track_id"):
+                    web_existing["track_ids"] = list(dict.fromkeys([*(web_existing.get("track_ids") or []), str(item["track_id"])]))
+                if web_existing and item.get("url") and item.get("url") != web_existing.get("url"):
+                    web_existing.setdefault("alternate_source_urls", [])
+                    if item["url"] not in web_existing["alternate_source_urls"]:
+                        web_existing["alternate_source_urls"].append(item["url"])
 
     return clean_list
 
@@ -483,7 +483,7 @@ def assemble_node(state: RunState) -> Dict[str, Any]:
 def verify_node(state: RunState) -> Dict[str, Any]:
     """Node 9: Deterministic citation and claim grounding verification."""
     run_id = state.get("run_id")
-    report_md = state.get("report_markdown", "")
+    report_md = state.get("report_markdown") or ""
     evidence = state.get("evidence_manifest", [])
     if _is_cancelled(run_id):
         return {}
@@ -491,9 +491,14 @@ def verify_node(state: RunState) -> Dict[str, Any]:
     _notify_stage(run_id, "verifying", "Running deterministic citation grounding & verification...", 94)
 
     reference_check = verify_and_ground_citations(report_md, evidence)
-    reference_clean_report = reference_check.get("cleaned_markdown", report_md)
+    reference_clean_report = reference_check.get("cleaned_markdown") or report_md
     cited_claims = extract_cited_claims(reference_clean_report, evidence)
-    verdicts = verify_claims(cited_claims, {e.get("source_id"): e for e in evidence if e.get("source_id")}, run_id=run_id)
+    sources_by_id = {
+        str(source_id): source
+        for source in evidence
+        if (source_id := source.get("source_id"))
+    }
+    verdicts = verify_claims(cited_claims, sources_by_id, run_id=run_id)
     guard_results = verify_and_ground_citations(reference_clean_report, evidence, verdicts)
     if cited_claims and not verdicts:
         guard_results["verification_warning"] = "Claim entailment could not be measured because the judge provider did not return a valid audit."
@@ -517,7 +522,7 @@ def verify_node(state: RunState) -> Dict[str, Any]:
 def score_node(state: RunState) -> Dict[str, Any]:
     """Node 10: Calculates faithfulness, relevancy, authority, and coverage scores."""
     run_id = state.get("run_id")
-    guard = state.get("guard_results", {})
+    guard = state.get("guard_results") or {}
     evidence = state.get("evidence_manifest", [])
     if _is_cancelled(run_id):
         return {}
@@ -531,6 +536,8 @@ def score_node(state: RunState) -> Dict[str, Any]:
     metric_result = calculate_research_metrics(plan, evidence, relevance_result, guard.get("faithfulness_score"))
     scores = metric_result["scores"]
 
+    budget = state.get("resource_budget")
+    budget_snapshot = budget.snapshot() if budget is not None else None
     if run_id:
         try:
             RelationalStore.save_scores(
@@ -544,7 +551,7 @@ def score_node(state: RunState) -> Dict[str, Any]:
                     "claims_audited": guard.get("claims_audited", 0),
                     "claims_supported": guard.get("claims_supported", 0),
                     **metric_result["details"],
-                    "research_budget": state.get("resource_budget").snapshot() if state.get("resource_budget") else None,
+                    "research_budget": budget_snapshot,
                 }
             )
         except Exception:
@@ -557,12 +564,14 @@ def finalize_node(state: RunState) -> Dict[str, Any]:
     """Node 11: Exports multi-format artifacts and finalizes run state in database."""
     run_id = state.get("run_id")
     query = state.get("query", "")
-    report_md = state.get("report_markdown", "")
-    guard = state.get("guard_results", {})
-    critic = state.get("critic_findings", {})
-    evidence = state.get("evidence_manifest", [])
+    report_md = state.get("report_markdown") or ""
     if _is_cancelled(run_id):
         return {}
+    if not report_md.strip():
+        raise ValueError("Cannot finalize a research run without report markdown.")
+    guard = state.get("guard_results") or {}
+    critic = state.get("critic_findings") or {}
+    evidence = state.get("evidence_manifest", [])
 
     _notify_stage(run_id, "exporting", "Exporting dossier artifacts (Markdown, JSON, HTML)...", 99)
     budget = state.get("resource_budget")

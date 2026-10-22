@@ -4,7 +4,7 @@
 
 from typing import Generator
 from sqlalchemy import create_engine, event
-from sqlalchemy.orm import Session, declarative_base, sessionmaker
+from sqlalchemy.orm import DeclarativeBase, Session, sessionmaker
 from engine.config import DATABASE_URL
 
 # Normalize postgres:// to postgresql:// for SQLAlchemy compatibility
@@ -40,7 +40,8 @@ if db_url.startswith("sqlite"):
         cursor.close()
 
 SessionLocal = sessionmaker(autocommit=False, autoflush=False, expire_on_commit=False, bind=engine)
-Base = declarative_base()
+class Base(DeclarativeBase):
+    """Typed declarative base shared by all SQLAlchemy models."""
 
 def get_db() -> Generator[Session, None, None]:
     """Yield a request-scoped SQLAlchemy session and always close it.

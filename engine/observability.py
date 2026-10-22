@@ -28,7 +28,7 @@ def research_run_trace(run_id: Optional[str], query: str) -> Iterator[Any]:
     try:
         # Langfuse SDK v4 uses LANGFUSE_BASE_URL. Accept the earlier OTEL host
         # name as a local compatibility fallback for existing .env files.
-        base_url = (os.getenv("LANGFUSE_BASE_URL") or os.getenv("LANGFUSE_OTEL_HOST", "")).strip()
+        base_url = (os.getenv("LANGFUSE_BASE_URL") or os.getenv("LANGFUSE_OTEL_HOST") or "").strip()
         if base_url:
             os.environ.setdefault("LANGFUSE_BASE_URL", base_url)
         from langfuse import get_client, propagate_attributes

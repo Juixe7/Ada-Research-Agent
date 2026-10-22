@@ -142,6 +142,12 @@ def execute_graph_pipeline(
             # Hard limits remain enforced if optional progress delivery fails.
             logger.exception("Unable to publish budget progress for run %s", report_id)
 
+    resource_budget = ResearchBudget(
+        max_searches=MAX_SEARCHES_PER_RUN,
+        max_fetches=MAX_FETCHES_PER_RUN,
+        timeout_seconds=RUN_TIME_BUDGET_SECONDS,
+        on_change=publish_budget_usage if report_id else None,
+    )
     initial_state: RunState = {
         "run_id": report_id or f"run_{os.urandom(4).hex()}",
         "query": query,
@@ -169,19 +175,14 @@ def execute_graph_pipeline(
         "scores": None,
         "export_paths": None,
         "warnings": [],
-        "resource_budget": ResearchBudget(
-            max_searches=MAX_SEARCHES_PER_RUN,
-            max_fetches=MAX_FETCHES_PER_RUN,
-            timeout_seconds=RUN_TIME_BUDGET_SECONDS,
-            on_change=publish_budget_usage if report_id else None,
-        )
+        "resource_budget": resource_budget,
     }
 
     if report_id:
         current_job = get_job_state(report_id) or {"report_id": report_id}
         current_job["budget_deadline_epoch"] = time.time() + RUN_TIME_BUDGET_SECONDS
         set_job_state(report_id, current_job)
-        publish_budget_usage(initial_state["resource_budget"].snapshot())
+        publish_budget_usage(resource_budget.snapshot())
 
     with research_run_trace(report_id, query) as trace:
         final_state = compiled_research_graph.invoke(initial_state)

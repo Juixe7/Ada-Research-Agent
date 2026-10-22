@@ -353,13 +353,13 @@ Open `http://localhost:3000`; backend OpenAPI is at `http://localhost:8000/docs`
 
 #### Validation
 
-Run Python lint, backend service type checking, the deterministic regression suite, and frontend static checks with:
+Run Python lint, backend type checking, the deterministic regression suite, and frontend static checks with:
 
 ```bash
 python -m pip install ruff==0.17.1
 ruff check --select F .
 python -m pip install mypy==2.4.0
-mypy engine/services --ignore-missing-imports --follow-imports=silent --check-untyped-defs
+mypy engine --ignore-missing-imports --follow-imports=silent --check-untyped-defs
 python -m pytest
 cd frontend && npm run lint && npx tsc --noEmit
 ```
