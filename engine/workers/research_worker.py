@@ -89,6 +89,56 @@ def _content_hash(text: str) -> str:
     """Return a stable SHA-256 digest for retrieved source text."""
     return hashlib.sha256(re.sub(r"\s+", " ", text or "").strip().casefold().encode("utf-8")).hexdigest()
 
+
+def _retrieve_vault_evidence(
+    query: str,
+    selected_docs: Optional[List[str]],
+    user_id: Optional[str],
+) -> List[Dict[str, Any]]:
+    """Search selected private documents and map passages into evidence records.
+
+    Vector-store errors propagate so each research workflow can report the
+    failure in its own warning format.
+    """
+    vector_store = get_vector_store()
+    matches = vector_store.search_user_docs(
+        query,
+        top_k=3,
+        score_threshold=0.55,
+        selected_docs=selected_docs,
+        user_id=user_id,
+    )
+    evidence = []
+    for match in matches:
+        passage_identity = match.get("chunk_id") or f"p{match.get('page_number', 1)}c{match.get('chunk_index', 0)}"
+        section_path = match.get("section_path")
+        passage = _evidence_passage(match.get("text", ""), query)
+        page_number = match["page_number"]
+        document_name = match["doc_name"]
+        evidence.append({
+            "source_id": f"DOC_{document_name}_{passage_identity}",
+            "source_type": "user_doc",
+            "chunk_id": match.get("chunk_id"),
+            "chunk_index": match.get("chunk_index"),
+            "section_path": section_path,
+            "doc_name": document_name,
+            "page_number": page_number,
+            "url": None,
+            "title": (
+                f"Internal Document: {document_name} — {section_path}"
+                if section_path
+                else f"Internal Document: {document_name} (Page {page_number})"
+            ),
+            "text": passage["text"],
+            "quote": passage["quote"],
+            "content_hash": _content_hash(match.get("text", "")),
+            "location": section_path or f"Page {page_number}",
+            "authority_score": None,
+            "relevance_score": match["score"],
+        })
+    return evidence
+
+
 def calculate_domain_authority(domain: str) -> float:
     """Calculates an authority score based on domain reputation."""
     domain_lower = (domain or "").lower().split(":", 1)[0].strip(".")
@@ -161,35 +211,7 @@ def execute_sub_research(
     # ── Step 1: Query Private User Documents (Qdrant) ──
     if include_user_docs:
         try:
-            vs = get_vector_store()
-            doc_matches = vs.search_user_docs(
-                sub_q,
-                top_k=3,
-                score_threshold=0.55,
-                selected_docs=selected_docs,
-                user_id=user_id
-            )
-            for dm in doc_matches:
-                passage_identity = dm.get("chunk_id") or f"p{dm.get('page_number', 1)}c{dm.get('chunk_index', 0)}"
-                section_label = dm.get("section_path")
-                passage = _evidence_passage(dm.get("text", ""), sub_q)
-                evidence_items.append({
-                    "source_id": f"DOC_{dm['doc_name']}_{passage_identity}",
-                    "source_type": "user_doc",
-                    "chunk_id": dm.get("chunk_id"),
-                    "chunk_index": dm.get("chunk_index"),
-                    "section_path": section_label,
-                    "doc_name": dm["doc_name"],
-                    "page_number": dm["page_number"],
-                    "url": None,
-                    "title": f"Internal Document: {dm['doc_name']} — {section_label}" if section_label else f"Internal Document: {dm['doc_name']} (Page {dm['page_number']})",
-                    "text": passage["text"],
-                    "quote": passage["quote"],
-                    "content_hash": _content_hash(dm.get("text", "")),
-                    "location": section_label or f"Page {dm.get('page_number', 1)}",
-                    "authority_score": None,  # User-provided documents are not assigned an authority score.
-                    "relevance_score": dm["score"]
-                })
+            evidence_items.extend(_retrieve_vault_evidence(sub_q, selected_docs, user_id))
         except Exception as e:
             print(f"[worker] User doc vector search warning: {e}")
 
@@ -314,35 +336,7 @@ def execute_iterative_sub_research(
     # Step 1: Search user documents once if enabled
     if include_user_docs:
         try:
-            vs = get_vector_store()
-            doc_matches = vs.search_user_docs(
-                sub_q,
-                top_k=3,
-                score_threshold=0.55,
-                selected_docs=selected_docs,
-                user_id=user_id
-            )
-            for dm in doc_matches:
-                passage_identity = dm.get("chunk_id") or f"p{dm.get('page_number', 1)}c{dm.get('chunk_index', 0)}"
-                section_label = dm.get("section_path")
-                passage = _evidence_passage(dm.get("text", ""), sub_q)
-                evidence_items.append({
-                    "source_id": f"DOC_{dm['doc_name']}_{passage_identity}",
-                    "source_type": "user_doc",
-                    "chunk_id": dm.get("chunk_id"),
-                    "chunk_index": dm.get("chunk_index"),
-                    "section_path": section_label,
-                    "doc_name": dm["doc_name"],
-                    "page_number": dm["page_number"],
-                    "url": None,
-                    "title": f"Internal Document: {dm['doc_name']} — {section_label}" if section_label else f"Internal Document: {dm['doc_name']} (Page {dm['page_number']})",
-                    "text": passage["text"],
-                    "quote": passage["quote"],
-                    "content_hash": _content_hash(dm.get("text", "")),
-                    "location": section_label or f"Page {dm.get('page_number', 1)}",
-                    "authority_score": None,
-                    "relevance_score": dm["score"]
-                })
+            evidence_items.extend(_retrieve_vault_evidence(sub_q, selected_docs, user_id))
         except Exception as e:
             print(f"[research_worker] User doc search notice: {e}")
             warnings.append("Private vault search was unavailable for this track; results may omit selected documents.")
