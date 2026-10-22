@@ -50,6 +50,10 @@ jobs:
         run: |
           python tests/test_e2e_audit.py
 
+      - name: Validate offline claim-evaluation benchmark
+        run: |
+          python -m pytest -q tests/test_claim_metrics.py
+
       - name: Set up Node.js 20
         uses: actions/setup-node@v4
         with:

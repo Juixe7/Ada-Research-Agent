@@ -86,6 +86,7 @@ The current implementation is a modular monolith with a separately runnable work
 ├── engine/
 │   ├── agents/             # Planning, critique, synthesis, claim checks, follow-up and memory
 │   ├── export/             # Markdown / HTML report export
+│   ├── evaluation/         # Offline claim-support metrics and dataset validation
 │   ├── graph/              # LangGraph state, nodes, routing and compiled pipeline
 │   ├── guards/             # Citation and evidence grounding
 │   ├── ingest/             # PDF, DOCX, CSV, text, web retrieval and chunking
@@ -102,6 +103,7 @@ The current implementation is a modular monolith with a separately runnable work
 │   ├── sessions.py         # Session and turn endpoints
 │   └── tasks.py            # Sync pipeline entry point and Celery task
 ├── packages/llm_gateway/   # Model groups, LiteLLM client, cache, limiter and trace IDs
+├── evals/                  # Versioned synthetic claim-support smoke dataset
 ├── frontend/src/
 │   ├── app/                # Next.js routes and global styles
 │   ├── components/         # Shared UI plus focused run and vault panels
@@ -362,10 +364,21 @@ ruff check --select F .
 python -m pip install mypy==2.4.0
 mypy engine --ignore-missing-imports --follow-imports=silent --check-untyped-defs
 python -m pytest
+python -m pytest -q tests/test_claim_metrics.py
 cd frontend && npm run lint && npx tsc --noEmit
 ```
 
 Live provider and web-retrieval checks are marked as integration tests and are excluded from the default pytest run. Run them explicitly with `python -m pytest -m integration`; they require provider keys and working search/network access, and may incur API usage.
+
+#### Claim-support evaluation
+
+`evals/claim_support_smoke.json` is a small, versioned set of synthetic claim/evidence pairs spanning supported, partial, and unsupported judgments. It is intended to smoke-check the claim judge and evaluation reporting, not to estimate Ada's real-world accuracy. Run it against the configured judge model with:
+
+```powershell
+.\.venv\Scripts\python.exe scripts\evaluate_claim_support.py --output output\claim-eval.json
+```
+
+The runner makes a provider call, emits a run ID that can be searched in local Langfuse, and reports accuracy, macro-F1, per-class precision/recall/F1, and a confusion matrix. Missing or malformed verdicts count as unanswered. CI validates the dataset and metric calculations without calling an LLM. Do not claim these synthetic scores as product benchmark results; a representative, human-reviewed dataset is needed for that.
 
 ### Docker Compose
 

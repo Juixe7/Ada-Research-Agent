@@ -1,0 +1,19 @@
+{
+  "name": "Ada claim support smoke benchmark",
+  "version": "1.0.0",
+  "provenance": "Synthetic examples authored for evaluator smoke checks; not sampled from user reports and not a product-quality accuracy benchmark.",
+  "cases": [
+    {"id":"supported-01","claim":"The pilot included 40 participants.","expected_verdict":"supported","evidence":["The pilot study enrolled 40 participants over eight weeks."]},
+    {"id":"supported-02","claim":"The service launched in March 2023.","expected_verdict":"supported","evidence":["The service became generally available in March 2023."]},
+    {"id":"supported-03","claim":"The device weighs 1.4 kilograms.","expected_verdict":"supported","evidence":["According to the product specification, the device weighs 1.4 kg."]},
+    {"id":"supported-04","claim":"The company has offices in Berlin and Madrid.","expected_verdict":"supported","evidence":["The company lists offices in Berlin and Madrid."]},
+    {"id":"partial-01","claim":"The pilot proves the product improves retention for all customers.","expected_verdict":"partial","evidence":["In a pilot with 40 participants, weekly usage increased during the eight-week study."]},
+    {"id":"partial-02","claim":"The company has a global customer base.","expected_verdict":"partial","evidence":["The company reported customers in Germany, France, and Spain."]},
+    {"id":"partial-03","claim":"The new process cuts costs by 30% across every department.","expected_verdict":"partial","evidence":["One operations team reported a 30% reduction in processing costs after adopting the new workflow."]},
+    {"id":"partial-04","claim":"The treatment is safe for long-term use.","expected_verdict":"partial","evidence":["No serious adverse events were recorded during the 12-week study."]},
+    {"id":"unsupported-01","claim":"The battery retained 99% capacity after 1,000 cycles.","expected_verdict":"unsupported","evidence":["The battery retained 92% capacity after 500 charge cycles."]},
+    {"id":"unsupported-02","claim":"The service launched in March 2024.","expected_verdict":"unsupported","evidence":["The service became generally available in March 2023."]},
+    {"id":"unsupported-03","claim":"The study included 4,000 participants.","expected_verdict":"unsupported","evidence":["The pilot study enrolled 40 participants over eight weeks."]},
+    {"id":"unsupported-04","claim":"The policy guarantees a 50% increase in revenue.","expected_verdict":"unsupported","evidence":["The policy describes a new review process and makes no revenue projection."]}
+  ]
+}
