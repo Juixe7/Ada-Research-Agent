@@ -32,7 +32,7 @@ def test_phase1_parallel_pipeline():
     assert worker_res["evidence_count"] > 0, "Research worker returned 0 evidence items"
 
     print("\n=== 3. TESTING FULL CONCURRENT RESEARCH FAN-OUT ===")
-    pipeline_res = run_research_pipeline_sync(test_query, depth="quick", max_workers=3)
+    pipeline_res = run_research_pipeline_sync(test_query, depth="quick")
     print(f"\nPipeline completed:")
     print(f"  Sub-tasks completed: {pipeline_res['sub_tasks_count']}")
     print(f"  Total distinct evidence units: {pipeline_res['total_evidence_units']}")

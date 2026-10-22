@@ -13,7 +13,7 @@ def test_phase2_critic_and_arbiter():
     test_query = "Commercialization timeline of solid-state batteries in electric vehicles vs LFP by 2026"
 
     print("=== TESTING PHASE 2: CRITIC & ARBITER PIPELINE ===")
-    pipeline_res = run_research_pipeline_sync(test_query, depth="quick", max_workers=3)
+    pipeline_res = run_research_pipeline_sync(test_query, depth="quick")
 
     print("\n=== VERIFYING RESULTS ===")
     audit = pipeline_res.get("critic_audit", {})

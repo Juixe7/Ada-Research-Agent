@@ -36,7 +36,6 @@ def test_phase3_full_deep_research():
         query=test_query,
         depth="quick",
         include_user_docs=True,
-        max_workers=3,
         user_id=test_user_id,
     )
 

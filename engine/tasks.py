@@ -1,54 +1,14 @@
-"""Synchronous research orchestration and Celery task entry points.
+"""Synchronous research orchestration and Celery task entry points."""
 
-"""
-
-import os
-import concurrent.futures
-import hashlib
 import logging
-import re
 from pathlib import Path
 from typing import List, Dict, Any, Optional
 from sqlalchemy.orm import Session
-from engine.agents.planner import generate_research_plan
-from engine.workers.research_worker import execute_sub_research
 from engine.celery_app import celery_app, get_job_state, set_job_state
 
 ROOT_DIR = Path(__file__).resolve().parent.parent
 DOSSIER_DIR = ROOT_DIR / "dossiers"
 logger = logging.getLogger(__name__)
-
-
-def normalize_and_deduplicate_evidence(raw_list: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
-    """Deduplicates sources across all parallel workers and assigns standardized IDs (D1, D2.. for docs; S1, S2.. for web)."""
-    seen_keys = set()
-    clean_list = []
-    doc_idx = 1
-    web_idx = 1
-
-    for item in raw_list:
-        stype = item.get("source_type", "web")
-        if stype == "user_doc":
-            passage_id = item.get("chunk_id")
-            if not passage_id:
-                normalized_text = re.sub(r"\s+", " ", item.get("text", "")).strip().casefold()
-                passage_id = hashlib.sha256(normalized_text.encode("utf-8")).hexdigest()
-            key = f"doc::{item.get('doc_name')}::{passage_id}"
-            if key not in seen_keys:
-                seen_keys.add(key)
-                item["source_id"] = f"D{doc_idx}"
-                doc_idx += 1
-                clean_list.append(item)
-        else:
-            url = item.get("url", "").split("?")[0].rstrip("/")
-            key = f"web::{url}" if url else f"title::{item.get('title', '')[:40]}"
-            if key not in seen_keys:
-                seen_keys.add(key)
-                item["source_id"] = f"S{web_idx}"
-                web_idx += 1
-                clean_list.append(item)
-
-    return clean_list
 
 
 def _update_stage(report_id: Optional[str], status: str, stage: str, progress: int) -> bool:
@@ -99,7 +59,6 @@ def run_research_pipeline_sync(
     query: str,
     depth: str = "deep",
     include_user_docs: bool = True,
-    max_workers: int = 4,
     report_id: Optional[str] = None,
     selected_docs: Optional[List[str]] = None,
     custom_angles: Optional[List[str]] = None,
@@ -216,7 +175,6 @@ def run_research_pipeline_task(
             query=query,
             depth=depth,
             include_user_docs=include_user_docs,
-            max_workers=4,
             report_id=report_id,
             selected_docs=selected_docs,
             custom_angles=custom_angles,
