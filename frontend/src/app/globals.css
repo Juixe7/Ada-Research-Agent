@@ -38,20 +38,6 @@
   --font-serif: var(--font-source-serif, 'Source Serif 4', Georgia, serif);
   --font-mono: var(--font-jetbrains-mono, 'JetBrains Mono', monospace);
 
-  /* Legacy variable aliases for component compatibility */
-  --bg-base: var(--paper);
-  --bg-surface: var(--surface);
-  --bg-elevated: var(--surface-2);
-  --bg-overlay: var(--surface);
-  --border-subtle: var(--line);
-  --border-default: var(--line-strong);
-  --border-strong: var(--line-strong);
-  --text-primary: var(--ink);
-  --text-secondary: var(--ink-2);
-  --text-muted: var(--ink-3);
-  --text-disabled: var(--ink-3);
-  --accent-neutral: var(--ink);
-  --accent-neutral-muted: var(--ink-3);
 }
 
 .dark {
@@ -86,20 +72,6 @@
   --info: #5B8EB5;
   --info-soft: #1B2631;
 
-  /* Legacy variable aliases */
-  --bg-base: var(--paper);
-  --bg-surface: var(--surface);
-  --bg-elevated: var(--surface-2);
-  --bg-overlay: var(--surface);
-  --border-subtle: var(--line);
-  --border-default: var(--line-strong);
-  --border-strong: var(--line-strong);
-  --text-primary: var(--ink);
-  --text-secondary: var(--ink-2);
-  --text-muted: var(--ink-3);
-  --text-disabled: var(--ink-3);
-  --accent-neutral: var(--ink);
-  --accent-neutral-muted: var(--ink-3);
 }
 
 /* ─── Typography & Base Resets ──────────────────────────────────── */
