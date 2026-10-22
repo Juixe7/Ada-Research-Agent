@@ -4,8 +4,11 @@
 
 import os
 import secrets
+import logging
 from pathlib import Path
 from dotenv import load_dotenv
+
+logger = logging.getLogger(__name__)
 
 # Locate and load the root .env
 ROOT_DIR = Path(__file__).resolve().parent.parent
@@ -76,7 +79,7 @@ if not JWT_SECRET:
     # Local development remains usable without checked-in credentials. This
     # intentionally invalidates local sessions when the process restarts.
     JWT_SECRET = secrets.token_urlsafe(48)
-    print("[config] JWT_SECRET is unset; using an ephemeral development secret.")
+    logger.warning("JWT_SECRET is unset; using an ephemeral development secret")
 JWT_ALGORITHM = "HS256"
 JWT_EXPIRY_DAYS = 7
 

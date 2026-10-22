@@ -3,7 +3,10 @@
 """
 
 from pathlib import Path
+import logging
 from typing import Optional
+
+logger = logging.getLogger(__name__)
 
 
 def has_persisted_report_artifact(report_id: str, report_json_path: Optional[str] = None) -> bool:
@@ -18,6 +21,6 @@ def has_persisted_report_artifact(report_id: str, report_json_path: Optional[str
 
         dossier = RelationalStore.get_full_run_dossier(report_id)
         return bool(dossier and dossier.get("report_markdown"))
-    except Exception as exc:
-        print(f"[reports] Artifact availability check warning: {exc}")
+    except Exception:
+        logger.warning("Could not verify report artifact in relational storage")
         return False

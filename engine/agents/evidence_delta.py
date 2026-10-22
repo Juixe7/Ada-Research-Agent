@@ -3,7 +3,10 @@
 """
 
 import json
+import logging
 from typing import List, Dict, Any
+
+logger = logging.getLogger(__name__)
 
 CONDENSATION_SYSTEM_PROMPT = """You are the Evidence-Delta Memory Agent of Ada Deep Research.
 Your role is to maintain continuous, high-efficiency research state across multi-turn investigations without blowing prompt token limits.
@@ -75,8 +78,8 @@ def condense_session_turns(turns_data: List[Dict[str, Any]]) -> Dict[str, Any]:
             all_urls = list(set(parsed.get("cached_urls", []) + cached_urls))
             parsed["cached_urls"] = all_urls[:30]
             return parsed
-        except Exception as e:
-            print(f"[EvidenceDelta] Parse fallback: {e}")
+        except Exception:
+            logger.warning("Prior-turn summary could not be parsed; using deterministic fallback")
 
     # Robust algorithmic fallback if LLM is unavailable
     facts = []

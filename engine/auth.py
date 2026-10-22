@@ -12,6 +12,7 @@ import secrets
 import hashlib
 import os
 import smtplib
+import logging
 from email.message import EmailMessage
 from datetime import datetime, timedelta, timezone
 from typing import Optional, Dict, Any
@@ -25,6 +26,8 @@ from sqlalchemy.orm import Session
 from engine.config import JWT_SECRET, JWT_ALGORITHM, JWT_EXPIRY_DAYS
 from engine.database import get_db
 from engine.models import User, ResearchSession, VaultDocument, PasswordResetToken
+
+logger = logging.getLogger(__name__)
 
 auth_router = APIRouter(prefix="/api/auth", tags=["auth"])
 security = HTTPBearer(auto_error=False)
@@ -411,7 +414,7 @@ def forgot_password(req: ForgotPasswordRequest, db: Session = Depends(get_db)) -
     except Exception as exc:
         db.query(PasswordResetToken).filter(PasswordResetToken.user_id == user.id).delete()
         db.commit()
-        print(f"[auth] Password reset email delivery failed: {type(exc).__name__}")
+        logger.warning("Password reset email delivery failed (%s)", type(exc).__name__)
     return generic_response
 
 @auth_router.post("/reset-password")

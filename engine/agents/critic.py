@@ -3,8 +3,11 @@
 """
 
 import json
+import logging
 import re
 from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 CRITIC_SYSTEM_PROMPT = """You are the Lead Adversarial Critic and Auditor of an autonomous deep research engine.
 Your mission is to rigorously evaluate the gathered evidence for a research investigation.
 
@@ -87,8 +90,8 @@ Conduct an adversarial audit. Identify gaps, check for conflicting metrics or ti
                 clean_json = re.sub(r',\s*([\]\}])', r'\1', raw_json)
                 audit = json.loads(clean_json)
                 return audit
-        except Exception as e:
-            print(f"[critic] Critic LLM parse error ({e}). Returning baseline audit.")
+        except Exception:
+            logger.warning("Critic response could not be parsed; returning the unavailable audit")
 
     # Do not invent gaps or arbiter queries when the audit model is unavailable.
     return {

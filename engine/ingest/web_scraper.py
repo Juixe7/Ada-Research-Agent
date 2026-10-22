@@ -3,6 +3,7 @@
 """
 
 import time
+import logging
 import re
 import socket
 import ipaddress
@@ -10,6 +11,8 @@ import requests
 from typing import Dict, Any, Optional, Callable
 from urllib.parse import urljoin, urlparse
 import trafilatura
+
+logger = logging.getLogger(__name__)
 
 # Standard desktop User-Agent
 DEFAULT_HEADERS = {
@@ -91,7 +94,7 @@ def scrape_webpage(
         return cancelled_result("cancelled")
 
     if not is_safe_public_url(url):
-        print(f"[scraper] Blocked unsafe/non-public URL: {url}")
+        logger.warning("Blocked unsafe or non-public URL during source retrieval")
         return {
             "url": url,
             "domain": domain,
@@ -167,8 +170,8 @@ def scrape_webpage(
                     "latency": round(time.time() - t0, 2),
                     "char_count": len(extracted)
                 }
-    except Exception as e:
-        print(f"[scraper] Tier 1 Trafilatura bypassed for {url}: {e}")
+    except Exception:
+        logger.warning("Page retrieval failed; the worker may use its search snippet fallback")
 
     # Return empty so the worker can use the provider's search snippet.
     return {

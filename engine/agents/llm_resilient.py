@@ -4,6 +4,7 @@
 
 import time
 import threading
+import logging
 from typing import Optional, Dict, Any, List, Type
 from pydantic import BaseModel
 
@@ -22,6 +23,8 @@ from packages.llm_gateway import (
     TokenBucketLimiter,
     ResponseCache
 )
+
+logger = logging.getLogger(__name__)
 
 def _get_redis_safe() -> Optional[Any]:
     """Connect to Redis for shared limits/cache, or return `None` on failure.
@@ -112,8 +115,8 @@ def call_gateway(
             deadline_epoch = run_state.get("budget_deadline_epoch")
             if deadline_epoch and time.time() >= float(deadline_epoch):
                 result = LLMResult(content="", group=group, degraded=True, error="Run time budget reached; no additional model request was sent.")
-        except Exception as deadline_error:
-            print(f"[llm] Deadline check notice: {deadline_error}")
+        except Exception:
+            logger.warning("Could not read deadline state for run %s", run_id)
         try:
             from engine.storage.relational_store import RelationalStore
             if result is None:
@@ -123,8 +126,8 @@ def call_gateway(
                     result = LLMResult(content="", group=group, degraded=True, error=f"Run token budget of {RUN_TOKEN_BUDGET:,} tokens reached; no additional model request was sent.")
                 elif RelationalStore.get_run_cost(run_id) >= RUN_COST_BUDGET_USD:
                     result = LLMResult(content="", group=group, degraded=True, error=f"Run cost budget of ${RUN_COST_BUDGET_USD:.2f} reached; no additional model request was sent.")
-        except Exception as budget_error:
-            print(f"[llm] Budget check notice: {budget_error}")
+        except Exception:
+            logger.warning("Could not read token or cost budget for run %s", run_id)
     if result is None:
         result = gateway.complete(
             group=group,
@@ -173,8 +176,8 @@ def call_gateway(
                 "degraded": result.degraded,
                 "error": result.error,
             })
-        except Exception as telemetry_error:
-            print(f"[llm] Telemetry persistence notice: {telemetry_error}")
+        except Exception:
+            logger.warning("Could not persist LLM telemetry for run %s", run_id)
     return result
 
 

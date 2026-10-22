@@ -3,8 +3,11 @@
 """
 
 import json
+import logging
 import re
 from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 PLANNER_SYSTEM_PROMPT = """You are the Lead Planning Agent of an autonomous deep research engine.
 Your task is to take a macro research query and decompose it into an optimal research plan consisting of 3 to 5 orthogonal sub-questions.
 
@@ -72,8 +75,8 @@ def generate_research_plan(
                 plan = json.loads(clean_json)
                 if isinstance(plan, list) and len(plan) > 0:
                     return plan[:6]
-        except Exception as e:
-            print(f"[planner] Lead Planner parse error ({e}).")
+        except Exception:
+            logger.warning("Planner response could not be parsed; using the deterministic fallback")
 
     # Resilient heuristic plan fallback
     return [

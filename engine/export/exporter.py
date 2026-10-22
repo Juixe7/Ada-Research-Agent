@@ -6,8 +6,11 @@ import re
 import json
 import html
 import uuid
+import logging
 from pathlib import Path
 from typing import Dict, Any, List, Optional
+
+logger = logging.getLogger(__name__)
 
 DOSSIER_DIR = Path("dossiers")
 
@@ -198,7 +201,7 @@ def export_research_dossier(
     with open(html_filename, "w", encoding="utf-8") as f:
         f.write(rendered_html)
 
-    print(f"[exporter] Exported dossier {rid} to:\n  - {md_filename}\n  - {json_filename}\n  - {html_filename}")
+    logger.info("Exported report artifacts for run %s", rid)
     return {
         "report_id": rid,
         "executive_title": exec_title,

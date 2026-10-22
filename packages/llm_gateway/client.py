@@ -173,7 +173,7 @@ class LLMClient:
 
         # 3. Primary Failed -> Engage Fallback Model
         err_msg = primary_res["error"]
-        print(f"[llm_gateway] Primary model '{primary_model}' for group '{group}' failed: {err_msg[:120]}. Engaging fallback...")
+        logger.warning("Primary model for group %s failed; trying the configured fallback", group)
 
         if not fallback_model:
             return LLMResult(

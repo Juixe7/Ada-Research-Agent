@@ -3,6 +3,7 @@
 """
 
 import uuid
+import logging
 import threading
 from typing import List, Dict, Any, Optional
 from pathlib import Path
@@ -10,6 +11,8 @@ from qdrant_client import QdrantClient
 from qdrant_client.http import models
 from fastembed import TextEmbedding
 from engine.config import QDRANT_COLLECTION, QDRANT_STORAGE_PATH, QDRANT_URL, QDRANT_API_KEY, EMBEDDING_MODEL_NAME
+
+logger = logging.getLogger(__name__)
 
 class AdaVectorStore:
     """
@@ -32,14 +35,14 @@ class AdaVectorStore:
         self.vector_size = 384  # bge-small-en-v1.5 dimension
         
         # Initialize FastEmbed Embedding Model
-        print(f"[vector_store] Loading FastEmbed model ({EMBEDDING_MODEL_NAME})...")
+        logger.info("Loading document embedding model %s", EMBEDDING_MODEL_NAME)
         self.embed_model = TextEmbedding(model_name=EMBEDDING_MODEL_NAME)
 
         # Initialize Qdrant Client (Remote HTTP/Cloud -> Local disk -> In-memory fallback)
         self.client = None
         if QDRANT_URL:
             try:
-                print(f"[vector_store] Connecting to Qdrant service at {QDRANT_URL}...")
+                logger.info("Connecting to configured Qdrant service")
                 candidate = QdrantClient(
                     url=QDRANT_URL,
                     api_key=QDRANT_API_KEY or None,
@@ -47,8 +50,8 @@ class AdaVectorStore:
                 )
                 candidate.get_collections()
                 self.client = candidate
-            except Exception as e:
-                print(f"[vector_store] Qdrant service unreachable ({e}); falling back to local path...")
+            except Exception:
+                logger.warning("Qdrant service is unavailable; trying local persistent storage")
 
         if self.client is None:
             Path(QDRANT_STORAGE_PATH).mkdir(parents=True, exist_ok=True)
@@ -75,7 +78,7 @@ class AdaVectorStore:
                         distance=models.Distance.COSINE
                     )
                 )
-                print(f"[vector_store] Created collection: {self.collection_name}")
+                logger.info("Created Qdrant collection %s", self.collection_name)
         except Exception as e:
             raise RuntimeError(f"Could not initialize Qdrant collection '{self.collection_name}'.") from e
 
@@ -124,7 +127,7 @@ class AdaVectorStore:
             collection_name=self.collection_name,
             points=points
         )
-        print(f"[vector_store] Indexed {len(points)} private document chunks into Qdrant.")
+        logger.info("Indexed %s private document chunks", len(points))
         return len(points)
 
     def search_user_docs(
@@ -266,8 +269,8 @@ class AdaVectorStore:
                     "char_count": pt.payload.get("char_count", len(pt.payload.get("text", "")))
                 })
             return sorted(chunks, key=lambda x: (x.get("page_number", 1), x.get("chunk_index") or 0))
-        except Exception as e:
-            print(f"[vector_store] Error fetching chunks for '{doc_name}': {e}")
+        except Exception:
+            logger.warning("Could not fetch indexed chunks for a vault document")
             return []
 
     def get_document_chunks_count(self, doc_name: str, user_id: Optional[str] = None) -> int:
@@ -320,10 +323,10 @@ class AdaVectorStore:
                     filter=models.Filter(must=must_conds)
                 )
             )
-            print(f"[vector_store] Deleted document '{doc_name}' from Qdrant.")
+            logger.info("Deleted indexed chunks for a vault document")
             return True
-        except Exception as e:
-            print(f"[vector_store] Error deleting document '{doc_name}': {e}")
+        except Exception:
+            logger.warning("Could not delete indexed chunks for a vault document")
             return False
 
 # Thread-safe singleton accessor

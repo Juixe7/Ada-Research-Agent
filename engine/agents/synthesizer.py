@@ -3,7 +3,10 @@
 """
 
 import html
+import logging
 from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 SYNTHESIZER_SYSTEM_INSTRUCTION = """You are the Chief Intelligence Analyst and Synthesizer of Ada Deep Research.
 Your objective is to craft an exhaustive, publication-grade, deeply analytical research dossier on the requested topic.
@@ -99,7 +102,7 @@ VERIFIED EVIDENCE CORPUS ({len(evidence_manifest)} Sources):
 Synthesize the definitive, publication-grade research report on this topic. Ensure heavy, accurate citation coverage using [Sx] and [Dx] notation throughout the text.
 """
 
-    print(f"[synthesizer] Prompting Gateway write group with {len(evidence_manifest)} sources (~{len(evidence_xml)//4} tokens)...")
+    logger.info("Synthesizing report from %s evidence sources", len(evidence_manifest))
 
     messages = [
         {"role": "system", "content": SYNTHESIZER_SYSTEM_INSTRUCTION},

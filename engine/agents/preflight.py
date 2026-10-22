@@ -3,8 +3,11 @@
 """
 
 import json
+import logging
 import re
 from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 PREFLIGHT_SYSTEM_PROMPT = """You are the Pre-Flight Scoping Agent of Ada Deep Research.
 Your goal is to align with the user before heavy web scrapers and crawlers run, ensuring the final research report directly fulfills their intended purpose.
@@ -108,8 +111,8 @@ POTENTIAL PRIVATE VAULT MATCH FOUND:
 - Relevance Score: {top_m.get('score')}
 - Excerpt: "{vault_doc_snippet}"
 """
-        except Exception as e:
-            print(f"[preflight] Vault peek warning: {e}")
+        except Exception:
+            logger.warning("Private-vault preflight search failed; continuing without its context")
 
     # ── Step 2: Formulate Prompt for Pre-Flight Scoping LLM ──
     user_prompt_lines = [
@@ -144,8 +147,8 @@ POTENTIAL PRIVATE VAULT MATCH FOUND:
                 } if vault_doc_snippet else {})
 
                 return data
-        except Exception as e:
-            print(f"[preflight] Preflight parse error: {e}")
+        except Exception:
+            logger.warning("Preflight response could not be parsed; using the unavailable result")
 
     # A failed scoping call must never be represented as retrieved evidence.
     # The caller can safely continue with the original query and disclose that

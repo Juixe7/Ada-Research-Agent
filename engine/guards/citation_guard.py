@@ -3,7 +3,10 @@
 """
 
 import re
+import logging
 from typing import List, Dict, Any, Optional
+
+logger = logging.getLogger(__name__)
 
 CITATION_REGEX = re.compile(r'\[(S\d+|D\d+)\]')
 _SENTENCE_SPLIT_REGEX = re.compile(r"(?<=[.!?])\s+(?!\[(?:S\d+|D\d+)\])")
@@ -91,7 +94,7 @@ def verify_and_ground_citations(
     rejected_claims: List[str] = []
 
     if hallucinated_ids:
-        print(f"[citation_guard] Flagged {len(hallucinated_ids)} unrecorded citation IDs: {hallucinated_ids}")
+        logger.warning("Citation validation found %s unrecorded source references", len(hallucinated_ids))
         hallucinated_set = set(hallucinated_ids)
         cleaned_lines = []
 
