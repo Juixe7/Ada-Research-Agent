@@ -357,7 +357,7 @@ Run the Python lint check, deterministic regression suite, and frontend static c
 
 ```bash
 python -m pip install ruff==0.17.1
-ruff check --select F engine
+ruff check --select F .
 python -m pytest
 cd frontend && npm run lint && npx tsc --noEmit
 ```

@@ -36,7 +36,7 @@ jobs:
       - name: Run focused Python lint
         run: |
           python -m pip install ruff==0.17.1
-          ruff check --select F engine
+          ruff check --select F .
 
       - name: Run E2E Functional & Security Test Suite
         env:

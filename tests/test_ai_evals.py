@@ -1,4 +1,3 @@
-import os
 import re
 import sys
 import time
@@ -63,7 +62,7 @@ class TestAIEngineeringEvals(unittest.TestCase):
 
         precision = (total_valid_citations / total_extracted_citations * 100.0) if total_extracted_citations > 0 else 0.0
 
-        print(f"\n[EVAL-01] Real Dossier Citation Precision:")
+        print("\n[EVAL-01] Real Dossier Citation Precision:")
         print(f"  • Evaluated Reports: {reports_evaluated}")
         print(f"  • Total Citations Extracted: {total_extracted_citations}")
         print(f"  • Grounded Manifest Matches: {total_valid_citations}")
@@ -102,11 +101,11 @@ class TestAIEngineeringEvals(unittest.TestCase):
         self.assertIn("400 Wh/kg", res["cleaned_markdown"])
         self.assertNotIn("[S99]", res["cleaned_markdown"], "Phantom tag was not scrubbed from mixed sentence!")
 
-        print(f"\n[EVAL-02] Adversarial Phantom Pruning:")
-        print(f"  • Injected Phantoms: 2 distinct IDs ('S99', 'D88')")
+        print("\n[EVAL-02] Adversarial Phantom Pruning:")
+        print("  • Injected Phantoms: 2 distinct IDs ('S99', 'D88')")
         print(f"  • Detection Rate: 100.0% (Detected: {res['hallucinated_ids']})")
         print(f"  • Rejected Ungrounded Claims: {res['rejected_claims_count']}")
-        print(f"  • Phantom Tag Scrubbing in Mixed Sentences: 100.0% clean")
+        print("  • Phantom Tag Scrubbing in Mixed Sentences: 100.0% clean")
 
     @pytest.mark.integration
     def test_03_claim_level_faithfulness_llm_judge(self):
@@ -245,9 +244,13 @@ class TestAIEngineeringEvals(unittest.TestCase):
             par_results = list(executor.map(simulate_track, sub_tasks))
         t_par = time.time() - t1
 
+        expected_results = [f"Results for {task}" for task in sub_tasks]
+        self.assertEqual(seq_results, expected_results)
+        self.assertEqual(par_results, expected_results)
+
         speedup_pct = ((t_seq - t_par) / t_seq) * 100.0
 
-        print(f"\n[EVAL-04] LangGraph Parallel Fan-Out vs Sequential Latency:")
+        print("\n[EVAL-04] LangGraph Parallel Fan-Out vs Sequential Latency:")
         print(f"  • Sequential Duration (4 tracks): {t_seq:.3f} s")
         print(f"  • Parallel Fan-Out Duration (4 tracks): {t_par:.3f} s")
         print(f"  • Concurrency Latency Reduction: {speedup_pct:.1f}%")
@@ -282,12 +285,12 @@ class TestAIEngineeringEvals(unittest.TestCase):
         self.assertIn("PASS", res.content.upper())
         self.assertEqual(res.model, "groq/qwen/qwen3.8-27b")
 
-        print(f"\n[EVAL-05] Gateway Failover Resilience:")
-        print(f"  • Primary Model: invalid/simulated_failure")
+        print("\n[EVAL-05] Gateway Failover Resilience:")
+        print("  • Primary Model: invalid/simulated_failure")
         print(f"  • Fallback Model Activated: {res.model}")
         print(f"  • Response Received: {res.content.strip()}")
         print(f"  • Failover Overhead: {elapsed:.2f} s")
-        print(f"  • Request Drop Rate: 0.0% (Transparent Recovery)")
+        print("  • Request Drop Rate: 0.0% (Transparent Recovery)")
 
 
 if __name__ == "__main__":

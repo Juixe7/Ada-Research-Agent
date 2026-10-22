@@ -1,4 +1,3 @@
-import os
 import sys
 from pathlib import Path
 
@@ -167,7 +166,7 @@ def test_5_end_to_end_pipeline_execution():
     assert len(result["sections"]) > 0
     assert result["faithfulness_score"] > 0
 
-    print(f"✓ LangGraph Pipeline Execution Completed Successfully:")
+    print("✓ LangGraph Pipeline Execution Completed Successfully:")
     print(f"  - Report ID: {result['report_id']}")
     print(f"  - Title: {result.get('executive_title')}")
     print(f"  - Tracks Planned: {len(result['plan'])}")
