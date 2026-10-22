@@ -147,7 +147,7 @@ class AdaVectorStore:
             return []
         query_vector = self.embed_texts([query])[0]
         
-        must_conditions = [
+        must_conditions: List[models.Condition] = [
             models.FieldCondition(
                 key="source_type",
                 match=models.MatchValue(value="user_doc")
@@ -182,14 +182,15 @@ class AdaVectorStore:
 
         matches = []
         for hit in response.points:
+            payload = hit.payload or {}
             matches.append({
                 "score": round(hit.score, 4),
-                "chunk_id": hit.payload.get("chunk_id"),
-                "chunk_index": hit.payload.get("chunk_index"),
-                "section_path": hit.payload.get("section_path"),
-                "doc_name": hit.payload.get("doc_name"),
-                "page_number": hit.payload.get("page_number"),
-                "text": hit.payload.get("text"),
+                "chunk_id": payload.get("chunk_id"),
+                "chunk_index": payload.get("chunk_index"),
+                "section_path": payload.get("section_path"),
+                "doc_name": payload.get("doc_name"),
+                "page_number": payload.get("page_number"),
+                "text": payload.get("text"),
                 "source_type": "user_doc"
             })
         return matches
@@ -204,7 +205,7 @@ class AdaVectorStore:
             models.FieldCondition(key="user_id", match=models.MatchValue(value=user_id)),
             models.FieldCondition(key="source_type", match=models.MatchValue(value="user_doc")),
         ])
-        old_point_ids: List[str | int] = []
+        old_point_ids: List[models.ExtendedPointId] = []
         offset = None
         while True:
             page, offset = self.client.scroll(
@@ -239,7 +240,7 @@ class AdaVectorStore:
         if not user_id:
             return []
         try:
-            must_conds = [
+            must_conds: List[models.Condition] = [
                 models.FieldCondition(
                     key="doc_name",
                     match=models.MatchValue(value=doc_name)
@@ -259,13 +260,14 @@ class AdaVectorStore:
             )
             chunks = []
             for pt in scroll_res[0]:
+                payload = pt.payload or {}
                 chunks.append({
-                    "chunk_id": pt.payload.get("chunk_id"),
-                    "page_number": pt.payload.get("page_number", 1),
-                    "section_path": pt.payload.get("section_path"),
-                    "chunk_index": pt.payload.get("chunk_index"),
-                    "text": pt.payload.get("text", ""),
-                    "char_count": pt.payload.get("char_count", len(pt.payload.get("text", "")))
+                    "chunk_id": payload.get("chunk_id"),
+                    "page_number": payload.get("page_number", 1),
+                    "section_path": payload.get("section_path"),
+                    "chunk_index": payload.get("chunk_index"),
+                    "text": payload.get("text", ""),
+                    "char_count": payload.get("char_count", len(payload.get("text", "")))
                 })
             return sorted(chunks, key=lambda x: (x.get("page_number", 1), x.get("chunk_index") or 0))
         except Exception:
@@ -277,7 +279,7 @@ class AdaVectorStore:
         if not user_id:
             return 0
         try:
-            must_conds = [
+            must_conds: List[models.Condition] = [
                 models.FieldCondition(
                     key="doc_name",
                     match=models.MatchValue(value=doc_name)
@@ -303,7 +305,7 @@ class AdaVectorStore:
         if not user_id:
             return False
         try:
-            must_conds = [
+            must_conds: List[models.Condition] = [
                 models.FieldCondition(
                     key="doc_name",
                     match=models.MatchValue(value=doc_name)

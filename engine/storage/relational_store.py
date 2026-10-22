@@ -8,7 +8,6 @@ import uuid
 from datetime import datetime, timezone
 from typing import Dict, Any, List, Optional
 from sqlalchemy.orm import Session
-from sqlalchemy import desc
 
 from engine.database import SessionLocal
 from engine.models import (
@@ -479,7 +478,7 @@ class RelationalStore:
         """Appends an event to the durable sequence for SSE stream replay."""
         db = cls.get_session()
         try:
-            last_event = db.query(Event).filter(Event.run_id == run_id).order_by(desc(Event.seq)).first()
+            last_event = db.query(Event).filter(Event.run_id == run_id).order_by(Event.seq.desc()).first()
             seq = (last_event.seq + 1) if last_event else 1
 
             event = Event(
@@ -555,7 +554,7 @@ class RelationalStore:
         """Returns the latest report for a given run."""
         db = cls.get_session()
         try:
-            report = db.query(Report).filter(Report.run_id == run_id).order_by(desc(Report.created_at)).first()
+            report = db.query(Report).filter(Report.run_id == run_id).order_by(Report.created_at.desc()).first()
             if not report:
                 return None
             return {
@@ -579,7 +578,7 @@ class RelationalStore:
             if not run:
                 return None
 
-            report = db.query(Report).filter(Report.run_id == run_id).order_by(desc(Report.created_at)).first()
+            report = db.query(Report).filter(Report.run_id == run_id).order_by(Report.created_at.desc()).first()
             score = db.query(Score).filter(Score.run_id == run_id).first()
 
             sources = db.query(Source).filter(Source.run_id == run_id).all()
@@ -708,7 +707,7 @@ class RelationalStore:
         """Updates the current report version after an authenticated addendum."""
         db = cls.get_session()
         try:
-            report = db.query(Report).filter(Report.run_id == run_id).order_by(desc(Report.created_at)).first()
+            report = db.query(Report).filter(Report.run_id == run_id).order_by(Report.created_at.desc()).first()
             if not report:
                 return False
             report.markdown = markdown

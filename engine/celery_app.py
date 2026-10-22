@@ -6,6 +6,7 @@ from __future__ import annotations
 import logging
 import json
 from typing import Dict, Any, Optional
+redis: Any
 try:
     import redis
 except ImportError:
@@ -121,7 +122,7 @@ def get_job_state(report_id: str) -> Optional[Dict[str, Any]]:
     if r is not None:
         try:
             raw = r.get(f"ada:job:{report_id}")
-            if raw:
+            if isinstance(raw, (str, bytes, bytearray)):
                 return json.loads(raw)
         except Exception:
             logger.warning("Could not read job state for run %s; using local fallback", report_id)

@@ -226,7 +226,7 @@ class ResearchRunService:
                 "session_id": turn.session_id, "query": turn.query,
             }
         if isinstance(turn_or_run, Run):
-            return {"status": turn_or_run.status, "report_id": report_id, "query": turn_or_run.query}
+            return {"status": turn_or_run.status, "report_id": report_id, "query": turn_or_run.question}
         raise ResearchRunServiceError(404, "Active research job not found.")
 
     def get_status(self, report_id: str, user: Optional[User], db: Session) -> dict[str, Any]:
