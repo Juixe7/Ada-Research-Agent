@@ -502,7 +502,8 @@ class VaultService:
                 document = pymupdf.open(str(target_file))
                 try:
                     page_count = len(document)
-                    extracted_text = "\n\n--- Page Break ---\n\n".join(page.get_text("text").strip() for page in document)
+                    page_texts = [document[index].get_text("text").strip() for index in range(page_count)]
+                    extracted_text = "\n\n--- Page Break ---\n\n".join(page_texts)
                 finally:
                     document.close()
             except Exception as exc:

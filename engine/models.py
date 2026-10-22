@@ -2,10 +2,14 @@
 
 """
 
+from __future__ import annotations
+
 import uuid
 from datetime import datetime, timezone
-from sqlalchemy import Column, String, Integer, Float, DateTime, Boolean, Text, ForeignKey, JSON
-from sqlalchemy.orm import relationship
+from typing import Any
+
+from sqlalchemy import String, Integer, Float, DateTime, Boolean, Text, ForeignKey, JSON
+from sqlalchemy.orm import Mapped, mapped_column, relationship
 from engine.database import Base
 
 def generate_uuid() -> str:
@@ -18,79 +22,85 @@ class User(Base):
     """Account credentials and profile metadata."""
     __tablename__ = "users"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    email = Column(String(255), unique=True, index=True, nullable=False)
-    username = Column(String(100), unique=True, index=True, nullable=False)
-    password_hash = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    email: Mapped[str] = mapped_column(String(255), unique=True, index=True, nullable=False)
+    username: Mapped[str] = mapped_column(String(100), unique=True, index=True, nullable=False)
+    password_hash: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+    )
 
     # Relationships
-    sessions = relationship("ResearchSession", back_populates="user", cascade="all, delete-orphan")
-    vault_documents = relationship("VaultDocument", back_populates="user", cascade="all, delete-orphan")
-    workspaces = relationship("Workspace", back_populates="user", cascade="all, delete-orphan")
-    runs = relationship("Run", back_populates="user")
+    sessions: Mapped[list[ResearchSession]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    vault_documents: Mapped[list[VaultDocument]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    workspaces: Mapped[list[Workspace]] = relationship(back_populates="user", cascade="all, delete-orphan")
+    runs: Mapped[list[Run]] = relationship(back_populates="user")
 
 
 class ResearchSession(Base):
     """An owner-scoped sequence of related research turns."""
     __tablename__ = "research_sessions"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    title = Column(String(255), nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
-    updated_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
+    updated_at: Mapped[datetime | None] = mapped_column(
+        DateTime, default=lambda: datetime.now(timezone.utc), onupdate=lambda: datetime.now(timezone.utc)
+    )
 
-    user = relationship("User", back_populates="sessions")
-    turns = relationship("ResearchTurn", back_populates="session", cascade="all, delete-orphan", order_by="ResearchTurn.turn_index")
+    user: Mapped[User] = relationship(back_populates="sessions")
+    turns: Mapped[list[ResearchTurn]] = relationship(
+        back_populates="session", cascade="all, delete-orphan", order_by="ResearchTurn.turn_index"
+    )
 
 
 class ResearchTurn(Base):
     """One question/result lifecycle entry within a research session."""
     __tablename__ = "research_turns"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    session_id = Column(String(36), ForeignKey("research_sessions.id", ondelete="CASCADE"), nullable=False, index=True)
-    turn_index = Column(Integer, nullable=False, default=1)
-    query = Column(Text, nullable=False)
-    executive_title = Column(String(255), nullable=True)
-    status = Column(String(50), default="planning", index=True)  # planning, running, completed, cancelled, failed
-    progress = Column(Integer, default=10)
-    stage = Column(String(255), default="Initializing autonomous research...")
-    working_memory_json = Column(Text, nullable=True)  # JSON string of 300-word memory + cited URLs
-    report_json_path = Column(String(255), nullable=True)
-    is_public = Column(Boolean, default=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    session_id: Mapped[str] = mapped_column(ForeignKey("research_sessions.id", ondelete="CASCADE"), index=True)
+    turn_index: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    query: Mapped[str] = mapped_column(Text, nullable=False)
+    executive_title: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    status: Mapped[str | None] = mapped_column(String(50), default="planning", index=True)
+    progress: Mapped[int | None] = mapped_column(Integer, default=10)
+    stage: Mapped[str | None] = mapped_column(String(255), default="Initializing autonomous research...")
+    working_memory_json: Mapped[str | None] = mapped_column(Text, nullable=True)
+    report_json_path: Mapped[str | None] = mapped_column(String(255), nullable=True)
+    is_public: Mapped[bool | None] = mapped_column(Boolean, default=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    session = relationship("ResearchSession", back_populates="turns")
+    session: Mapped[ResearchSession] = relationship(back_populates="turns")
 
 
 class VaultDocument(Base):
     """Metadata for a user-owned uploaded or pasted source document."""
     __tablename__ = "vault_documents"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    doc_name = Column(String(255), nullable=False, index=True)
-    file_size = Column(Integer, default=0)
-    chunk_count = Column(Integer, default=0)
-    uploaded_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    doc_name: Mapped[str] = mapped_column(String(255), nullable=False, index=True)
+    file_size: Mapped[int | None] = mapped_column(Integer, default=0)
+    chunk_count: Mapped[int | None] = mapped_column(Integer, default=0)
+    uploaded_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    user = relationship("User", back_populates="vault_documents")
+    user: Mapped[User] = relationship(back_populates="vault_documents")
 
 
 class PasswordResetToken(Base):
     """Hashed one-time password reset token and expiry."""
     __tablename__ = "password_reset_tokens"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    token = Column(String(64), unique=True, index=True, nullable=False)
-    expires_at = Column(DateTime, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    token: Mapped[str] = mapped_column(String(64), unique=True, index=True, nullable=False)
+    expires_at: Mapped[datetime] = mapped_column(DateTime, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    user = relationship("User")
+    user: Mapped[User] = relationship()
 
 
 # ── Blueprint Section 10: Relational Research Data Model ─────
@@ -99,216 +109,216 @@ class Workspace(Base):
     """Owner-scoped container for normalized runs."""
     __tablename__ = "workspaces"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    user_id = Column(String(36), ForeignKey("users.id", ondelete="CASCADE"), nullable=False, index=True)
-    name = Column(String(255), nullable=False, default="Default Workspace")
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    user_id: Mapped[str] = mapped_column(ForeignKey("users.id", ondelete="CASCADE"), index=True)
+    name: Mapped[str] = mapped_column(String(255), nullable=False, default="Default Workspace")
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    user = relationship("User", back_populates="workspaces")
-    runs = relationship("Run", back_populates="workspace", cascade="all, delete-orphan")
+    user: Mapped[User] = relationship(back_populates="workspaces")
+    runs: Mapped[list[Run]] = relationship(back_populates="workspace", cascade="all, delete-orphan")
 
 
 class Run(Base):
     """Normalized research-run lifecycle and configuration record."""
     __tablename__ = "runs"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    workspace_id = Column(String(36), ForeignKey("workspaces.id", ondelete="SET NULL"), nullable=True, index=True)
-    user_id = Column(String(36), ForeignKey("users.id", ondelete="SET NULL"), nullable=True, index=True)
-    parent_run_id = Column(String(36), ForeignKey("runs.id", ondelete="SET NULL"), nullable=True, index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    workspace_id: Mapped[str | None] = mapped_column(ForeignKey("workspaces.id", ondelete="SET NULL"), index=True)
+    user_id: Mapped[str | None] = mapped_column(ForeignKey("users.id", ondelete="SET NULL"), index=True)
+    parent_run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id", ondelete="SET NULL"), index=True)
 
-    question = Column(Text, nullable=False)
-    settings = Column(JSON, nullable=True)  # { depth: "deep", include_user_docs: true, domains: [] }
+    question: Mapped[str] = mapped_column(Text, nullable=False)
+    settings: Mapped[dict[str, Any] | None] = mapped_column(JSON)
 
     # Status progression (Blueprint Section 10):
     # scoping -> awaiting_clarification -> planning -> researching -> auditing -> writing -> verifying -> completed (or failed, cancelled)
-    status = Column(String(50), default="planning", index=True)
-    stage = Column(String(255), default="Initializing autonomous research...")
-    progress = Column(Integer, default=10)
+    status: Mapped[str | None] = mapped_column(String(50), default="planning", index=True)
+    stage: Mapped[str | None] = mapped_column(String(255), default="Initializing autonomous research...")
+    progress: Mapped[int | None] = mapped_column(Integer, default=10)
 
-    brief = Column(JSON, nullable=True)         # Clarified user brief & scope
-    plan = Column(JSON, nullable=True)          # Structured array of tracks
-    assumptions = Column(JSON, nullable=True)   # Scope assumptions when skipped
-    error = Column(Text, nullable=True)
+    brief: Mapped[Any | None] = mapped_column(JSON)
+    plan: Mapped[Any | None] = mapped_column(JSON)
+    assumptions: Mapped[Any | None] = mapped_column(JSON)
+    error: Mapped[str | None] = mapped_column(Text)
 
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
-    completed_at = Column(DateTime, nullable=True)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    completed_at: Mapped[datetime | None] = mapped_column(DateTime, nullable=True)
 
     # Relationships
-    workspace = relationship("Workspace", back_populates="runs")
-    user = relationship("User", back_populates="runs")
-    parent_run = relationship("Run", remote_side=[id], backref="followup_runs")
+    workspace: Mapped[Workspace | None] = relationship(back_populates="runs")
+    user: Mapped[User | None] = relationship(back_populates="runs")
+    parent_run: Mapped[Run | None] = relationship(remote_side=[id], backref="followup_runs")
 
-    tracks = relationship("Track", back_populates="run", cascade="all, delete-orphan")
-    sources = relationship("Source", back_populates="run", cascade="all, delete-orphan")
-    evidence = relationship("Evidence", back_populates="run", cascade="all, delete-orphan")
-    findings = relationship("Finding", back_populates="run", cascade="all, delete-orphan")
-    reports = relationship("Report", back_populates="run", cascade="all, delete-orphan")
-    scores = relationship("Score", back_populates="run", cascade="all, delete-orphan", uselist=False)
-    memories = relationship("Memory", back_populates="run", cascade="all, delete-orphan")
-    llm_calls = relationship("LLMCall", back_populates="run", cascade="all, delete-orphan")
-    events = relationship("Event", back_populates="run", cascade="all, delete-orphan", order_by="Event.seq")
+    tracks: Mapped[list[Track]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    sources: Mapped[list[Source]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    evidence: Mapped[list[Evidence]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    findings: Mapped[list[Finding]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    reports: Mapped[list[Report]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    scores: Mapped[Score | None] = relationship(back_populates="run", cascade="all, delete-orphan", uselist=False)
+    memories: Mapped[list[Memory]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    llm_calls: Mapped[list[LLMCall]] = relationship(back_populates="run", cascade="all, delete-orphan")
+    events: Mapped[list[Event]] = relationship(back_populates="run", cascade="all, delete-orphan", order_by="Event.seq")
 
 
 class Track(Base):
     """Sub-question execution metadata for one run."""
     __tablename__ = "tracks"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    run_id = Column(String(36), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    title = Column(String(255), nullable=False)
-    subquestions = Column(JSON, nullable=True)  # List of query strings / subtasks
-    status = Column(String(50), default="pending")  # pending, researching, completed, failed
-    iterations = Column(Integer, default=1)
-    stats = Column(JSON, nullable=True)  # { sources_found: 8, pages_scraped: 2, duration_sec: 12.4 }
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    title: Mapped[str] = mapped_column(String(255), nullable=False)
+    subquestions: Mapped[Any | None] = mapped_column(JSON)
+    status: Mapped[str | None] = mapped_column(String(50), default="pending")
+    iterations: Mapped[int | None] = mapped_column(Integer, default=1)
+    stats: Mapped[Any | None] = mapped_column(JSON)
 
-    run = relationship("Run", back_populates="tracks")
+    run: Mapped[Run] = relationship(back_populates="tracks")
 
 
 class Source(Base):
     """A web or private-document source referenced by evidence."""
     __tablename__ = "sources"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    run_id = Column(String(36), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    track_id = Column(String(36), nullable=True)
-    kind = Column(String(20), default="web")  # "web" or "doc"
-    url = Column(Text, nullable=True)
-    canonical_url = Column(Text, nullable=True, index=True)
-    title = Column(String(500), nullable=True)
-    domain = Column(String(255), nullable=True)
-    published_at = Column(String(100), nullable=True)
-    authority_tier = Column(Float, default=0.7)
-    content_hash = Column(String(64), nullable=True)
-    tag = Column(String(20), nullable=False)  # S1, S2, D1, D2
-    fetched_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    track_id: Mapped[str | None] = mapped_column(String(36))
+    kind: Mapped[str | None] = mapped_column(String(20), default="web")
+    url: Mapped[str | None] = mapped_column(Text)
+    canonical_url: Mapped[str | None] = mapped_column(Text, index=True)
+    title: Mapped[str | None] = mapped_column(String(500))
+    domain: Mapped[str | None] = mapped_column(String(255))
+    published_at: Mapped[str | None] = mapped_column(String(100))
+    authority_tier: Mapped[float | None] = mapped_column(Float, default=0.7)
+    content_hash: Mapped[str | None] = mapped_column(String(64))
+    tag: Mapped[str] = mapped_column(String(20), nullable=False)
+    fetched_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    run = relationship("Run", back_populates="sources")
-    evidence = relationship("Evidence", back_populates="source", cascade="all, delete-orphan")
+    run: Mapped[Run] = relationship(back_populates="sources")
+    evidence: Mapped[list[Evidence]] = relationship(back_populates="source", cascade="all, delete-orphan")
 
 
 class Evidence(Base):
     """A retrieved passage linked to its source and research track."""
     __tablename__ = "evidence"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    run_id = Column(String(36), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    source_id = Column(String(36), ForeignKey("sources.id", ondelete="CASCADE"), nullable=False, index=True)
-    track_id = Column(String(36), nullable=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    source_id: Mapped[str] = mapped_column(ForeignKey("sources.id", ondelete="CASCADE"), index=True)
+    track_id: Mapped[str | None] = mapped_column(String(36))
 
-    claim = Column(Text, nullable=True)
-    quote = Column(Text, nullable=False)        # Verbatim quote excerpt
-    location = Column(String(255), nullable=True)  # Page number, section header, or URL
-    values = Column(JSON, nullable=True)        # Structured metric values for quantitative tables
-    relevance = Column(Float, default=0.8)
-    final_score = Column(Float, default=0.8)
+    claim: Mapped[str | None] = mapped_column(Text)
+    quote: Mapped[str] = mapped_column(Text, nullable=False)
+    location: Mapped[str | None] = mapped_column(String(255))
+    values: Mapped[Any | None] = mapped_column(JSON)
+    relevance: Mapped[float | None] = mapped_column(Float, default=0.8)
+    final_score: Mapped[float | None] = mapped_column(Float, default=0.8)
 
-    run = relationship("Run", back_populates="evidence")
-    source = relationship("Source", back_populates="evidence")
+    run: Mapped[Run] = relationship(back_populates="evidence")
+    source: Mapped[Source] = relationship(back_populates="evidence")
 
 
 class Finding(Base):
     """Critic finding about coverage, contradiction, or evidence quality."""
     __tablename__ = "findings"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    run_id = Column(String(36), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    type = Column(String(50), nullable=False)   # "contradiction", "gap", "bias"
-    description = Column(Text, nullable=False)
-    evidence_ids = Column(JSON, nullable=True)  # List of source tags/IDs involved
-    status = Column(String(50), default="open") # "open", "resolved"
-    resolution_note = Column(Text, nullable=True)
-    followup = Column(JSON, nullable=True)      # Arbiter queries proposed
-    round = Column(Integer, default=1)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    type: Mapped[str] = mapped_column(String(50), nullable=False)
+    description: Mapped[str] = mapped_column(Text, nullable=False)
+    evidence_ids: Mapped[Any | None] = mapped_column(JSON)
+    status: Mapped[str | None] = mapped_column(String(50), default="open")
+    resolution_note: Mapped[str | None] = mapped_column(Text)
+    followup: Mapped[Any | None] = mapped_column(JSON)
+    round: Mapped[int | None] = mapped_column(Integer, default=1)
 
-    run = relationship("Run", back_populates="findings")
+    run: Mapped[Run] = relationship(back_populates="findings")
 
 
 class Report(Base):
     """Persisted report metadata and generated content reference."""
     __tablename__ = "reports"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    run_id = Column(String(36), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    version = Column(Integer, default=1)
-    markdown = Column(Text, nullable=False)
-    outline = Column(JSON, nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    version: Mapped[int | None] = mapped_column(Integer, default=1)
+    markdown: Mapped[str] = mapped_column(Text, nullable=False)
+    outline: Mapped[Any | None] = mapped_column(JSON)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    run = relationship("Run", back_populates="reports")
-    claims = relationship("Claim", back_populates="report", cascade="all, delete-orphan")
+    run: Mapped[Run] = relationship(back_populates="reports")
+    claims: Mapped[list[Claim]] = relationship(back_populates="report", cascade="all, delete-orphan")
 
 
 class Claim(Base):
     """A report claim and its evidence-support assessment."""
     __tablename__ = "claims"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    report_id = Column(String(36), ForeignKey("reports.id", ondelete="CASCADE"), nullable=False, index=True)
-    sentence = Column(Text, nullable=False)
-    tags = Column(JSON, nullable=True)          # ['S1', 'D2']
-    verdict = Column(String(50), default="supported")  # "supported", "partial", "flagged"
-    reason = Column(Text, nullable=True)
-    section = Column(String(255), nullable=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    report_id: Mapped[str] = mapped_column(ForeignKey("reports.id", ondelete="CASCADE"), index=True)
+    sentence: Mapped[str] = mapped_column(Text, nullable=False)
+    tags: Mapped[Any | None] = mapped_column(JSON)
+    verdict: Mapped[str | None] = mapped_column(String(50), default="supported")
+    reason: Mapped[str | None] = mapped_column(Text)
+    section: Mapped[str | None] = mapped_column(String(255))
 
-    report = relationship("Report", back_populates="claims")
+    report: Mapped[Report] = relationship(back_populates="claims")
 
 
 class Score(Base):
     """Run quality/evaluation metric record."""
     __tablename__ = "scores"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    run_id = Column(String(36), ForeignKey("runs.id", ondelete="CASCADE"), unique=True, nullable=False, index=True)
-    faithfulness = Column(Float, nullable=True, default=None)
-    relevancy = Column(Float, nullable=True, default=None)
-    authority = Column(Float, nullable=True, default=None)
-    coverage = Column(Float, nullable=True, default=None)
-    details = Column(JSON, nullable=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), unique=True, index=True)
+    faithfulness: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    relevancy: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    authority: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    coverage: Mapped[float | None] = mapped_column(Float, nullable=True, default=None)
+    details: Mapped[Any | None] = mapped_column(JSON)
 
-    run = relationship("Run", back_populates="scores")
+    run: Mapped[Run] = relationship(back_populates="scores")
 
 
 class Memory(Base):
     """Condensed prior-session context used for follow-up planning."""
     __tablename__ = "memories"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    run_id = Column(String(36), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    content = Column(JSON, nullable=False)      # Working memory: condensed facts, visited URLs, unresolved gaps
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc))
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    content: Mapped[Any] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc))
 
-    run = relationship("Run", back_populates="memories")
+    run: Mapped[Run] = relationship(back_populates="memories")
 
 
 class LLMCall(Base):
     """Per-model-call usage, latency, cost, and trace metadata."""
     __tablename__ = "llm_calls"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    run_id = Column(String(36), ForeignKey("runs.id", ondelete="CASCADE"), nullable=True, index=True)
-    agent = Column(String(100), nullable=False)
-    model = Column(String(100), nullable=False)
-    tokens_in = Column(Integer, default=0)
-    tokens_out = Column(Integer, default=0)
-    latency_ms = Column(Float, default=0.0)
-    cost = Column(Float, default=0.0)
-    cache_hit = Column(Boolean, default=False)
-    trace_id = Column(String(100), nullable=True)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    run_id: Mapped[str | None] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    agent: Mapped[str] = mapped_column(String(100), nullable=False)
+    model: Mapped[str] = mapped_column(String(100), nullable=False)
+    tokens_in: Mapped[int | None] = mapped_column(Integer, default=0)
+    tokens_out: Mapped[int | None] = mapped_column(Integer, default=0)
+    latency_ms: Mapped[float | None] = mapped_column(Float, default=0.0)
+    cost: Mapped[float | None] = mapped_column(Float, default=0.0)
+    cache_hit: Mapped[bool | None] = mapped_column(Boolean, default=False)
+    trace_id: Mapped[str | None] = mapped_column(String(100))
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
-    run = relationship("Run", back_populates="llm_calls")
+    run: Mapped[Run | None] = relationship(back_populates="llm_calls")
 
 
 class Event(Base):
     """Sequenced lifecycle event persisted for run replay."""
     __tablename__ = "events"
 
-    id = Column(String(36), primary_key=True, default=generate_uuid)
-    run_id = Column(String(36), ForeignKey("runs.id", ondelete="CASCADE"), nullable=False, index=True)
-    seq = Column(Integer, nullable=False, default=1)
-    type = Column(String(100), nullable=False, index=True)  # run.status, track.progress, finding.raised, etc.
-    payload = Column(JSON, nullable=False)
-    created_at = Column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
+    id: Mapped[str] = mapped_column(String(36), primary_key=True, default=generate_uuid)
+    run_id: Mapped[str] = mapped_column(ForeignKey("runs.id", ondelete="CASCADE"), index=True)
+    seq: Mapped[int] = mapped_column(Integer, nullable=False, default=1)
+    type: Mapped[str] = mapped_column(String(100), nullable=False, index=True)
+    payload: Mapped[Any] = mapped_column(JSON, nullable=False)
+    created_at: Mapped[datetime | None] = mapped_column(DateTime, default=lambda: datetime.now(timezone.utc), index=True)
 
-    run = relationship("Run", back_populates="events")
+    run: Mapped[Run] = relationship(back_populates="events")
