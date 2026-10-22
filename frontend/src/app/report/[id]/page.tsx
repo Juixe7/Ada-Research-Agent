@@ -7,11 +7,12 @@ import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import {
   ArrowLeft, Check, Copy, ExternalLink, Printer,
-  ShieldCheck, AlertTriangle, X, ChevronRight, Share2,
+  ShieldCheck, AlertTriangle, X, Share2,
   CheckCircle2
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import RunInspectorDrawer from "@/components/RunInspectorDrawer";
+import ReportEvidencePanel from "@/components/report/ReportEvidencePanel";
 import { API_URL, formatDossierDate } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
 import { useReportFollowups } from "@/hooks/useReportFollowups";
@@ -658,122 +659,12 @@ export default function ReportReaderPage({
           </section>
         </article>
 
-        {/* ── Column 3: SCORES PANEL (Right, 280px, collapses < 1200px) ─ */}
-        <aside className="hidden xl:block w-[280px] shrink-0 sticky top-20 space-y-6 font-sans">
-          {/* Quality Scores Card */}
-          <div className="p-4 rounded-[10px] bg-[var(--surface)] border border-[var(--line)] space-y-4">
-            <span className="text-[11px] font-mono uppercase tracking-wider text-[var(--ink-3)] font-semibold block">
-              Evidence Signals
-            </span>
-
-            {scores ? (
-              <>
-                <div className="space-y-3 font-mono text-xs">
-                  {/* Claim entailment */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-[var(--ink-2)]">Claims supported</span>
-                      <span className="font-semibold text-[var(--ok)]">
-                        {scores.faithfulness != null ? `${(scores.faithfulness * 100).toFixed(0)}%` : "—"}
-                      </span>
-                    </div>
-                    <div className="w-full h-1 bg-[var(--line)] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[var(--ok)] rounded-full"
-                        style={{ width: `${scores.faithfulness != null ? scores.faithfulness * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Relevancy */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-[var(--ink-2)]" title="Mean evidence relevance judged across planned research tracks.">Track relevance</span>
-                      <span className="font-semibold text-[var(--ink)]">
-                        {scores.relevancy != null ? `${(scores.relevancy * 100).toFixed(0)}%` : "—"}
-                      </span>
-                    </div>
-                    <div className="w-full h-1 bg-[var(--line)] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[var(--accent)] rounded-full"
-                        style={{ width: `${scores.relevancy != null ? scores.relevancy * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Authority */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-[var(--ink-2)]" title="Heuristic source-domain estimate; it is not a verification of source accuracy.">Heuristic authority</span>
-                      <span className="font-semibold text-[var(--ink)]">
-                        {scores.authority != null ? `${(scores.authority * 100).toFixed(0)}%` : "—"}
-                      </span>
-                    </div>
-                    <div className="w-full h-1 bg-[var(--line)] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[var(--ink-2)] rounded-full"
-                        style={{ width: `${scores.authority != null ? scores.authority * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-
-                  {/* Coverage */}
-                  <div className="space-y-1">
-                    <div className="flex justify-between text-[11px]">
-                      <span className="text-[var(--ink-2)]" title="Tracks with judged relevance of at least 0.65 and evidence from at least two distinct source domains or documents.">Track coverage</span>
-                      <span className="font-semibold text-[var(--ink)]">
-                        {scores.coverage != null ? `${(scores.coverage * 100).toFixed(0)}%` : "—"}
-                      </span>
-                    </div>
-                    <div className="w-full h-1 bg-[var(--line)] rounded-full overflow-hidden">
-                      <div
-                        className="h-full bg-[var(--accent)] rounded-full"
-                        style={{ width: `${scores.coverage != null ? scores.coverage * 100 : 0}%` }}
-                      />
-                    </div>
-                  </div>
-                </div>
-
-                <div className="flex justify-between text-[11px] font-mono pt-2 border-t border-[var(--line)]">
-                  <span className="text-[var(--ink-2)]">Citation IDs resolved</span>
-                  <span className="font-semibold text-[var(--ink)]">{citationValidity != null ? `${(citationValidity * 100).toFixed(0)}%` : "Not measured"}</span>
-                </div>
-
-                <p className="text-xs font-sans text-[var(--ink-2)] pt-1 border-t border-[var(--line)] leading-relaxed">
-                  Claim support is judged against cited excerpts. Unavailable judgments are shown as unmeasured; citation-ID validity is reported separately.
-                </p>
-                <p className="text-[11px] font-sans text-[var(--ink-3)] leading-relaxed">
-                  Track coverage requires relevant evidence from two independent sources. Authority is a domain heuristic, not a factuality check.
-                </p>
-              </>
-            ) : (
-              <div className="space-y-2 py-1">
-                <p className="text-xs font-sans text-[var(--ink-3)] leading-relaxed">
-                  Verification telemetry was not recorded for this legacy dossier.
-                </p>
-              </div>
-            )}
-
-            <button
-              type="button"
-              onClick={() => setRunInspectorOpen(true)}
-              className="btn-secondary w-full text-xs"
-            >
-              <span>Open details</span>
-              <ChevronRight className="w-3.5 h-3.5" />
-            </button>
-          </div>
-
-          {/* Pruned Claims Section */}
-          <div className="p-3.5 rounded-[8px] bg-[var(--surface-2)]/30 border border-[var(--line)] space-y-2 text-xs">
-            <span className="text-[10px] font-mono uppercase text-[var(--ink-3)] font-semibold block">
-              Unmatched Citation IDs
-            </span>
-            <p className="text-[11px] text-[var(--ink-3)] leading-relaxed">
-              {report.guard_results?.hallucinated_sources_count ?? "—"} citation IDs did not match the retrieved evidence manifest. Claim judgments and reasons are listed in run details.
-            </p>
-          </div>
-        </aside>
+        <ReportEvidencePanel
+          scores={scores}
+          citationValidity={citationValidity}
+          unmatchedCitationCount={report.guard_results?.hallucinated_sources_count}
+          onOpenDetails={() => setRunInspectorOpen(true)}
+        />
       </div>
 
       {/* ─── Screen 7.8 Evidence Inspector Drawer (Right, 380px) ───────── */}
