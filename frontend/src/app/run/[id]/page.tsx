@@ -4,11 +4,12 @@ import { useState, useEffect, useRef, use, useCallback } from "react";
 import { useRouter } from "next/navigation";
 import {
   ArrowLeft, AlertTriangle, ChevronDown,
-  ChevronRight, ArrowUpRight
+  ChevronRight
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
 import RunActivityFeed from "@/components/run/RunActivityFeed";
 import RunSourcesPanel from "@/components/run/RunSourcesPanel";
+import RunProgressHeader from "@/components/run/RunProgressHeader";
 import { useRunEventStream } from "@/hooks/useRunEventStream";
 import { API_URL } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
@@ -23,16 +24,6 @@ import type {
 } from "@/lib/research-run-types";
 import { toPipelineStage } from "@/lib/research-run-utils";
 import { toActivityEvent } from "@/lib/run-event-activity";
-
-// Pipeline 6-stage definition matching Blueprint & Design Guide Section 7.3
-const PIPELINE_STAGES = [
-  { id: "scope", label: "Scope" },
-  { id: "plan", label: "Plan" },
-  { id: "gather", label: "Gather" },
-  { id: "audit", label: "Audit" },
-  { id: "write", label: "Write" },
-  { id: "verify", label: "Verify" },
-];
 
 interface ResearchTrack {
   id: string | number;
@@ -419,12 +410,6 @@ function RunInvestigation({ runId }: { runId: string }) {
     }
   };
 
-  const formatTimer = (sec: number) => {
-    const m = Math.floor(sec / 60);
-    const s = sec % 60;
-    return `${m.toString().padStart(2, "0")}:${s.toString().padStart(2, "0")}`;
-  };
-
   if (authLoading || !token || !runLoaded) {
     return (
       <div className="min-h-screen bg-[var(--paper)] text-[var(--ink)]">
@@ -510,111 +495,23 @@ function RunInvestigation({ runId }: { runId: string }) {
     );
   }
 
-  // Calculate Stage Index for linear strip
-  const currentStageIdx = PIPELINE_STAGES.findIndex((s) => s.id === activeStage);
-
   return (
     <div className="min-h-screen bg-[var(--paper)] text-[var(--ink)] flex flex-col font-sans selection:bg-[var(--accent-soft)]">
-      {/* ─── Top Bar: Title, Depth, Timer & Pipeline Strip ───────────── */}
-      <header className="sticky top-0 z-30 bg-[var(--surface)] hairline-b">
-        <div className="max-w-[1400px] mx-auto px-6 py-3 flex flex-col gap-2.5">
-          {/* Row 1: Back, Title, Timer */}
-          <div className="flex items-center justify-between gap-4">
-            <div className="flex items-center gap-3 min-w-0">
-              <button
-                type="button"
-                onClick={() => router.push("/dashboard")}
-                className="p-1 rounded text-[var(--ink-3)] hover:text-[var(--ink)] transition-colors"
-                  title="Return to dashboard"
-              >
-                <ArrowLeft className="w-4 h-4" />
-              </button>
-
-              <h1 className="font-serif text-[17px] font-semibold text-[var(--ink)] truncate max-w-xl">
-                {query}
-              </h1>
-
-              {reconnected && (
-                <span className="text-[10px] font-mono text-[var(--accent)] bg-[var(--accent-soft)] px-2 py-0.5 rounded-[3px]">
-                  Reconnected
-                </span>
-              )}
-            </div>
-
-            <div className="flex items-center gap-3 shrink-0 font-mono text-xs text-[var(--ink-2)]">
-              <span className="capitalize px-2 py-0.5 rounded-[4px] bg-[var(--surface-2)] border border-[var(--line)]">
-                {depth}
-              </span>
-              <span>·</span>
-              <span className="text-[var(--ink)] font-semibold">
-                {formatTimer(elapsedSec)}
-              </span>
-
-              {status === "completed" && (
-                <button
-                  type="button"
-                  onClick={() => router.push(`/report/${runId}`)}
-                  className="btn-primary py-1 px-3 text-xs ml-2"
-                >
-                  <span>View report</span>
-                  <ArrowUpRight className="w-3.5 h-3.5" />
-                </button>
-              )}
-            </div>
-          </div>
-
-          {/* Row 2: 6-Node Pipeline Linear Strip */}
-          <div className="flex items-center justify-between pt-1">
-            <div className="flex items-center gap-2 sm:gap-4 overflow-x-auto py-1">
-              {PIPELINE_STAGES.map((stg, idx) => {
-                const isDone = idx < currentStageIdx || status === "completed";
-                const isActive = idx === currentStageIdx && status === "running";
-
-                return (
-                  <button
-                    key={stg.id}
-                    type="button"
-                    onClick={() =>
-                      setSelectedStageFilter(
-                        selectedStageFilter === stg.id ? "all" : stg.id
-                      )
-                    }
-                    className={`flex items-center gap-1.5 text-xs font-sans transition-all ${
-                      selectedStageFilter === stg.id
-                        ? "text-[var(--accent)] font-semibold"
-                        : "text-[var(--ink-2)] hover:text-[var(--ink)]"
-                    }`}
-                  >
-                    {/* 10px circular node */}
-                    <div
-                      className={`w-2.5 h-2.5 rounded-full transition-all shrink-0 ${
-                        isDone
-                          ? "bg-[var(--ink-2)]"
-                          : isActive
-                          ? "bg-transparent border-2 border-[var(--accent)] animate-quiet-pulse"
-                          : "border border-[var(--line-strong)]"
-                      }`}
-                    />
-                    <span className="uppercase text-[11px] tracking-wider font-mono">
-                      {stg.label}
-                    </span>
-
-                    {idx < PIPELINE_STAGES.length - 1 && (
-                      <span className="text-[var(--line-strong)] select-none ml-2 sm:ml-3">
-                        —
-                      </span>
-                    )}
-                  </button>
-                );
-              })}
-            </div>
-
-            <div className="text-[11px] font-mono text-[var(--ink-3)] hidden md:block">
-              {stageProgressNote}
-            </div>
-          </div>
-        </div>
-      </header>
+      <RunProgressHeader
+        query={query}
+        depth={depth}
+        elapsedSeconds={elapsedSec}
+        status={status}
+        reconnected={reconnected}
+        activeStage={activeStage}
+        stageProgressNote={stageProgressNote}
+        selectedStageFilter={selectedStageFilter}
+        onBack={() => router.push("/dashboard")}
+        onViewReport={() => router.push(`/report/${runId}`)}
+        onStageFilterChange={(stageId) =>
+          setSelectedStageFilter((current) => current === stageId ? "all" : stageId)
+        }
+      />
 
       {/* ─── Hero 3-Column Split Layout ──────────────────────────────── */}
       <div className="flex-1 max-w-[1400px] w-full mx-auto flex flex-col md:flex-row overflow-hidden">
