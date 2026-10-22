@@ -14,6 +14,7 @@ from engine.models import (
     Workspace, Run, Track, Source, Evidence,
     Finding, Report, Claim, Score, LLMCall, Event
 )
+from engine.storage.run_dossier import assemble_run_dossier
 
 logger = logging.getLogger(__name__)
 
@@ -588,117 +589,17 @@ class RelationalStore:
             events = db.query(Event).filter(Event.run_id == run_id).order_by(Event.seq.asc()).all()
             claims = db.query(Claim).filter(Claim.report_id == report.id).all() if report else []
 
-            sources_list = [
-                {
-                    "source_id": s.tag,
-                    "kind": "doc" if s.kind in {"doc", "user_doc"} else "web",
-                    "title": s.title,
-                    "url": s.url,
-                    "canonical_url": s.canonical_url,
-                    "domain": s.domain,
-                    "authority_tier": s.authority_tier,
-                    "published_at": s.published_at,
-                    "snippet": next((item.quote for item in sorted(
-                        s.evidence, key=lambda item: item.final_score or 0, reverse=True
-                    ) if item.quote), None),
-                    "location": next((item.location for item in s.evidence if item.location), None),
-                }
-                for s in sources
-            ]
-
-            findings_list = [
-                {
-                    "id": f.id,
-                    "type": f.type,
-                    "description": f.description,
-                    "status": f.status,
-                    "resolution_note": f.resolution_note
-                }
-                for f in findings
-            ]
-
-            claims_list = [
-                {
-                    "sentence": c.sentence,
-                    "tags": c.tags,
-                    "verdict": c.verdict,
-                    "reason": c.reason
-                }
-                for c in claims
-            ]
-
-            tracks_list = [
-                {
-                    "id": t.id,
-                    "title": t.title,
-                    "status": "running" if t.status in ("pending", "researching") and run.status not in ("completed", "failed", "cancelled") else ("completed" if t.status == "completed" or run.status == "completed" else t.status),
-                    "sources_count": (t.stats or {}).get("sources_found", 0),
-                    "queries_count": len(t.subquestions or []),
-                    "progress_pct": 100 if t.status == "completed" or run.status == "completed" else 50 if t.status == "researching" else 0,
-                }
-                for t in tracks
-            ]
-            llm_calls_list = [
-                {
-                    "id": call.id,
-                    "agent": call.agent,
-                    "model": call.model,
-                    "tokens_in": call.tokens_in,
-                    "tokens_out": call.tokens_out,
-                    "latency_ms": call.latency_ms,
-                    "cost": call.cost,
-                    "cache_hit": call.cache_hit,
-                    "trace_id": call.trace_id,
-                    "created_at": call.created_at.isoformat() if call.created_at else None,
-                }
-                for call in llm_calls
-            ]
-            events_list = [
-                {
-                    "id": event.id,
-                    "seq": event.seq,
-                    "type": event.type,
-                    "payload": event.payload,
-                    "created_at": event.created_at.isoformat() if event.created_at else None,
-                }
-                for event in events
-            ]
-            provider_warnings = [event["payload"] for event in events_list if event["type"] == "provider_degraded"]
-            research_warnings = [event["payload"] for event in events_list if event["type"] == "research_warning"]
-            settings = run.settings or {}
-
-            return {
-                "run_id": run.id,
-                "question": run.question,
-                "query": run.question,
-                "depth": settings.get("depth", "standard"),
-                "status": run.status,
-                "stage": run.stage,
-                "progress": run.progress,
-                "created_at": run.created_at.isoformat() if run.created_at else None,
-                "completed_at": run.completed_at.isoformat() if run.completed_at else None,
-                "report_markdown": report.markdown if report else None,
-                "report_id": report.id if report else None,
-                "scores": {
-                    "faithfulness": score.faithfulness,
-                    "relevancy": score.relevancy,
-                    "authority": score.authority,
-                    "coverage": score.coverage,
-                    "citation_validity": (score.details or {}).get("citation_validity"),
-                } if score else None,
-                "budget_usage": (score.details or {}).get("research_budget") if score else None,
-                "citation_validity_score": (score.details or {}).get("citation_validity") if score else None,
-                "sources_count": len(sources),
-                "sources": sources_list,
-                "findings": findings_list,
-                "claims": claims_list,
-                "tracks_count": len(tracks),
-                "tracks": tracks_list,
-                "llm_calls": llm_calls_list,
-                "events": events_list,
-                "provider_warnings": provider_warnings,
-                "research_warnings": research_warnings,
-            }
+            return assemble_run_dossier(
+                run=run,
+                report=report,
+                score=score,
+                sources=sources,
+                findings=findings,
+                tracks=tracks,
+                llm_calls=llm_calls,
+                events=events,
+                claims=claims,
+            )
         finally:
             db.close()
 
