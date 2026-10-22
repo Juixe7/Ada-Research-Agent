@@ -1,7 +1,15 @@
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 
 import { API_URL } from "@/lib/config";
-import type { DocPreview, VaultDoc } from "@/lib/vault-types";
+import type {
+  VaultDeleteResponse,
+  VaultDocumentSummary,
+  VaultListResponse,
+  VaultPasteResponse,
+  VaultPreviewResponse,
+  VaultReindexResponse,
+  VaultUploadResponse,
+} from "@/lib/api-types";
 
 const MAX_UPLOAD_BYTES = 20 * 1024 * 1024;
 const SUPPORTED_EXTENSIONS = new Set([".pdf", ".docx", ".txt", ".md", ".csv"]);
@@ -26,12 +34,12 @@ function messageFrom(error: unknown, fallback: string): string {
 
 /** Owns authenticated source-library reads and mutations for the vault page. */
 export function useVaultLibrary(token: string | null, authLoading: boolean) {
-  const [documents, setDocuments] = useState<VaultDoc[]>([]);
+  const [documents, setDocuments] = useState<VaultDocumentSummary[]>([]);
   const [loadedDocumentsToken, setLoadedDocumentsToken] = useState<string | null>(null);
   const [statusMsg, setStatusMsg] = useState("");
   const [errorMsg, setErrorMsg] = useState("");
   const [selectedDocName, setSelectedDocName] = useState<string | null>(null);
-  const [previewDoc, setPreviewDoc] = useState<DocPreview | null>(null);
+  const [previewDoc, setPreviewDoc] = useState<VaultPreviewResponse | null>(null);
   const [loadingPreview, setLoadingPreview] = useState(false);
   const [previewError, setPreviewError] = useState<string | null>(null);
   const [uploading, setUploading] = useState(false);
@@ -56,7 +64,7 @@ export function useVaultLibrary(token: string | null, authLoading: boolean) {
       const response = await fetch(`${API_URL}/api/vault/${encodeURIComponent(docName)}/preview`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const data = await readResponse<DocPreview>(response);
+      const data = await readResponse<VaultPreviewResponse>(response);
       if (requestId === previewRequestId.current) setPreviewDoc(data);
     } catch (error: unknown) {
       if (requestId === previewRequestId.current) {
@@ -74,8 +82,8 @@ export function useVaultLibrary(token: string | null, authLoading: boolean) {
       const response = await fetch(`${API_URL}/api/vault`, {
         headers: { Authorization: `Bearer ${token}` },
       });
-      const payload = await readResponse<{ documents?: VaultDoc[] }>(response);
-      const nextDocuments = payload.documents ?? [];
+      const payload = await readResponse<VaultListResponse>(response);
+      const nextDocuments = payload.documents;
       if (requestId !== documentsRequestId.current) return nextDocuments;
       setDocuments(nextDocuments);
       if (nextDocuments.length && !selectedDocNameRef.current) {
@@ -129,10 +137,10 @@ export function useVaultLibrary(token: string | null, authLoading: boolean) {
         headers: { Authorization: `Bearer ${token}` },
         body,
       });
-      const payload = await readResponse<{ message?: string; filename?: string }>(response);
-      setStatusMsg(payload.message || `Added ${file.name} to your research library.`);
+      const payload = await readResponse<VaultUploadResponse>(response);
+      setStatusMsg(payload.message);
       await refreshDocuments();
-      if (payload.filename) void openPreview(payload.filename);
+      void openPreview(payload.filename);
       return true;
     } catch (error: unknown) {
       setErrorMsg(messageFrom(error, "Upload failed."));
@@ -157,10 +165,10 @@ export function useVaultLibrary(token: string | null, authLoading: boolean) {
         headers: { Authorization: `Bearer ${token}`, "Content-Type": "application/json" },
         body: JSON.stringify({ title: title || "Private Research Memo", text }),
       });
-      const payload = await readResponse<{ doc_name?: string }>(response);
+      const payload = await readResponse<VaultPasteResponse>(response);
       setStatusMsg("Your research note was added to the source library.");
       await refreshDocuments();
-      if (payload.doc_name) void openPreview(payload.doc_name);
+      void openPreview(payload.doc_name);
       return true;
     } catch (error: unknown) {
       setErrorMsg(messageFrom(error, "Failed to process text memo."));
@@ -180,8 +188,8 @@ export function useVaultLibrary(token: string | null, authLoading: boolean) {
         method: "POST",
         headers: { Authorization: `Bearer ${token}` },
       });
-      const payload = await readResponse<{ chunks_indexed?: number }>(response);
-      setStatusMsg(`Indexed ${payload.chunks_indexed || 0} searchable passages.`);
+      const payload = await readResponse<VaultReindexResponse>(response);
+      setStatusMsg(`Indexed ${payload.chunks_indexed} searchable passages.`);
       await refreshDocuments();
       await openPreview(docName);
     } catch (error: unknown) {
@@ -198,7 +206,7 @@ export function useVaultLibrary(token: string | null, authLoading: boolean) {
         method: "DELETE",
         headers: { Authorization: `Bearer ${token}` },
       });
-      await readResponse<{ message?: string }>(response);
+      await readResponse<VaultDeleteResponse>(response);
       setDocuments(current => current.filter(document => document.doc_name !== docName));
       if (selectedDocNameRef.current === docName) {
         previewRequestId.current += 1;

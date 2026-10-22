@@ -53,7 +53,7 @@ export default function HistoryArchivePage() {
 
   const filtered = useMemo(() => {
     return reports.filter((r) => {
-      const q = (r.query || r.title || "").toLowerCase();
+      const q = (r.query || r.executive_title || "").toLowerCase();
       const matchSearch = q.includes(searchTerm.toLowerCase());
       const matchStatus = statusFilter === "all" || r.status === statusFilter;
       const matchDepth = depthFilter === "all" || r.depth === depthFilter;
@@ -195,7 +195,7 @@ export default function HistoryArchivePage() {
                           type="checkbox"
                           checked={isSelected}
                           disabled={!isCompleted}
-                          aria-label={`Select ${item.query || item.title || "research"} for comparison`}
+                          aria-label={`Select ${item.query || item.executive_title || "research"} for comparison`}
                           title={!isCompleted ? "Only completed research can be compared" : "Select for comparison"}
                           onChange={() => toggleSelect(id)}
                           className="rounded-[3px] accent-[var(--accent)] cursor-pointer"
@@ -208,7 +208,7 @@ export default function HistoryArchivePage() {
                           href={isCompleted ? `/report/${id}` : `/run/${id}`}
                           className="text-[var(--ink)] group-hover:text-[var(--accent)] focus-visible:underline transition-colors"
                         >
-                          {item.title || item.query || `Research #${id}`}
+                          {item.executive_title || item.query || `Research #${id}`}
                         </Link>
                       </td>
 

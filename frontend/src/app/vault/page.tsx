@@ -283,7 +283,8 @@ export default function KnowledgeVaultPage() {
             ) : (
               filteredDocuments.map((doc) => {
                 const isSelected = selectedDocName === doc.doc_name;
-                const uploadDate = doc.uploaded_at || doc.created_at;
+                const uploadDate = doc.uploaded_at;
+                const isSearchable = doc.index_status === "searchable";
                 return (
                   <div
                     key={doc.doc_name}
@@ -312,12 +313,12 @@ export default function KnowledgeVaultPage() {
                         </span>
                       </span>
                       <span className={`inline-flex items-center gap-1 text-[10px] font-mono px-1.5 py-0.5 rounded border shrink-0 ${
-                        (doc.chunk_count || 0) > 0
+                        isSearchable
                           ? "text-[var(--ok)] bg-[var(--ok-soft)] border-[var(--ok)]/30"
                           : "text-[var(--warn)] bg-[var(--warn-soft)] border-[var(--warn)]/30"
                       }`}>
-                        <span className={`w-1.5 h-1.5 rounded-full ${(doc.chunk_count || 0) > 0 ? "bg-[var(--ok)]" : "bg-[var(--warn)]"}`} />
-                        <span>{(doc.chunk_count || 0) > 0 ? "Searchable" : "Not searchable"}</span>
+                        <span className={`w-1.5 h-1.5 rounded-full ${isSearchable ? "bg-[var(--ok)]" : "bg-[var(--warn)]"}`} />
+                        <span>{isSearchable ? "Searchable" : "Not searchable"}</span>
                       </span>
                     </button>
                     <button

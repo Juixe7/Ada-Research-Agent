@@ -7,7 +7,12 @@ import {
 } from "lucide-react";
 import { API_URL } from "@/lib/config";
 import { useAuth } from "@/context/AuthContext";
-import type { ResearchReportSummary, VaultDocumentSummary } from "@/lib/api-types";
+import type {
+  ResearchReportListResponse,
+  ResearchReportSummary,
+  VaultDocumentSummary,
+  VaultListResponse,
+} from "@/lib/api-types";
 
 interface PaletteItem {
   id: string;
@@ -62,7 +67,7 @@ export default function CommandPalette() {
 
     fetch(`${API_URL}/api/reports`, { headers, signal: controller.signal })
       .then((response) => (response.ok ? response.json() : { reports: [] }))
-      .then((data: { reports?: ResearchReportSummary[] }) => setRunResults({ token, items: data.reports?.slice(0, 5) ?? [] }))
+      .then((data: ResearchReportListResponse) => setRunResults({ token, items: data.reports.slice(0, 5) }))
       .catch((error: unknown) => {
         if (!(error instanceof DOMException && error.name === "AbortError")) setRunResults({ token, items: [] });
       });
@@ -70,7 +75,7 @@ export default function CommandPalette() {
     if (token) {
       fetch(`${API_URL}/api/vault`, { headers, signal: controller.signal })
         .then((response) => (response.ok ? response.json() : { documents: [] }))
-        .then((data: { documents?: VaultDocumentSummary[] }) => setDocResults({ token, items: data.documents?.slice(0, 5) ?? [] }))
+        .then((data: VaultListResponse) => setDocResults({ token, items: data.documents.slice(0, 5) }))
         .catch((error: unknown) => {
           if (!(error instanceof DOMException && error.name === "AbortError")) setDocResults({ token, items: [] });
         });
@@ -109,11 +114,11 @@ export default function CommandPalette() {
     },
     // Runs
     ...runs.map((r) => ({
-      id: `run-${r.report_id || r.id}`,
+      id: `run-${r.report_id}`,
       category: "Runs" as const,
-      label: r.title || r.query || `Investigation #${r.report_id}`,
+      label: r.executive_title || r.query || `Investigation #${r.report_id}`,
       sublabel: `${r.depth || "standard"} mode · ${r.status}`,
-      href: r.status === "completed" ? `/report/${r.report_id || r.id}` : `/run/${r.report_id || r.id}`,
+      href: r.status === "completed" ? `/report/${r.report_id}` : `/run/${r.report_id}`,
     })),
     // Vault Docs
     ...docs.map((d) => ({

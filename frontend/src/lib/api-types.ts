@@ -1,21 +1,18 @@
 /** Minimal response shapes consumed by the frontend API clients. */
 export interface ResearchReportSummary {
   report_id: string;
-  session_id?: string;
-  id?: string;
-  _id?: string;
+  session_id?: string | null;
   query?: string | null;
-  title?: string;
-  executive_title?: string;
-  status?: string;
-  depth?: string;
-  progress?: number;
-  stage?: string;
+  executive_title?: string | null;
+  status?: string | null;
+  depth?: string | null;
+  progress?: number | null;
+  stage?: string | null;
   faithfulness_score?: number | null;
   coverage_score?: number | null;
-  total_sources_cited?: number;
-  is_public?: boolean;
-  created_at?: string | number;
+  total_sources_cited?: number | null;
+  is_public?: boolean | null;
+  created_at?: string | null;
 }
 
 export interface ResearchReportListResponse {
@@ -61,6 +58,15 @@ export interface VaultDeleteResponse {
   doc_name: string;
 }
 
+export interface VaultPassage {
+  chunk_id?: string | null;
+  page_number?: number;
+  section_path?: string | null;
+  chunk_index?: number;
+  text: string;
+  char_count?: number;
+}
+
 export interface VaultPreviewResponse {
   doc_name: string;
   filename: string;
@@ -69,7 +75,7 @@ export interface VaultPreviewResponse {
   char_count: number;
   chunks_indexed: number;
   text: string;
-  chunks: Array<Record<string, unknown>>;
+  chunks: VaultPassage[];
 }
 
 export interface ClarificationChoice {

@@ -11,12 +11,12 @@ import {
   RefreshCw,
 } from "lucide-react";
 
-import type { DocPreview } from "@/lib/vault-types";
+import type { VaultPreviewResponse } from "@/lib/api-types";
 
 type PreviewTab = "reader" | "passages";
 
 interface VaultPreviewPanelProps {
-  preview: DocPreview | null;
+  preview: VaultPreviewResponse | null;
   selectedDocName: string | null;
   loading: boolean;
   error: string | null;
@@ -213,7 +213,6 @@ export default function VaultPreviewPanel({
                             <FileText className="h-3 w-3" aria-hidden="true" />
                             <span>Passage {passage.chunk_index || index + 1} • Page {passage.page_number || 1}</span>
                           </span>
-                          {passage.score !== undefined && <span className="text-[var(--ink-4)]">Relevance: {(passage.score * 100).toFixed(0)}%</span>}
                         </div>
                         {passage.section_path && <p className="text-[10px] font-medium tracking-wide text-[var(--ink-3)]">{passage.section_path}</p>}
                         <p className="border-l-2 border-[var(--accent)]/40 py-0.5 pl-3 font-serif text-xs italic leading-relaxed text-[var(--ink)]">

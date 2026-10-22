@@ -14,7 +14,12 @@ import { useAuth } from "@/context/AuthContext";
 import { API_URL, formatDossierDate } from "@/lib/config";
 import { useResearchLaunch } from "@/hooks/useResearchLaunch";
 import type { ResearchDomain } from "@/hooks/useResearchLaunch";
-import type { ResearchReportSummary, VaultDocumentSummary } from "@/lib/api-types";
+import type {
+  ResearchReportListResponse,
+  ResearchReportSummary,
+  VaultDocumentSummary,
+  VaultListResponse,
+} from "@/lib/api-types";
 
 const DOMAIN_FILTERS = [
   { id: "all", label: "All Evidence", desc: "Broad consensus" },
@@ -126,9 +131,9 @@ function ResearchStudioContent() {
         if (!res.ok) throw new Error("Could not load research history");
         return res.json();
       })
-      .then((data: { reports?: ResearchReportSummary[] }) => {
+      .then((data: ResearchReportListResponse) => {
         if (controller.signal.aborted) return;
-        setHistoryState({ token, reports: data.reports?.slice(0, 10) ?? [], pending: false, error: false });
+        setHistoryState({ token, reports: data.reports.slice(0, 10), pending: false, error: false });
       })
       .catch((err) => {
         if (controller.signal.aborted) return;
@@ -150,10 +155,10 @@ function ResearchStudioContent() {
         if (!res.ok) throw new Error("Could not load source library");
         return res.json();
       })
-      .then((data: { documents?: VaultDocumentSummary[] }) => {
+      .then((data: VaultListResponse) => {
         if (controller.signal.aborted) return;
-        const documents = data.documents ?? [];
-        const searchableDocs = documents.filter((document) => (document.chunk_count || 0) > 0);
+        const documents = data.documents;
+        const searchableDocs = documents.filter((document) => document.index_status === "searchable");
         setVaultState({
           token,
           documents,
@@ -289,13 +294,13 @@ function ResearchStudioContent() {
                 <div className="space-y-2 max-h-[440px] overflow-y-auto pr-1">
                   {recentReports.map((report) => (
                     <div
-                      key={report.id || report._id || report.report_id}
+                      key={report.report_id}
                       className="group p-3 rounded-[8px] bg-[var(--surface-2)] border border-[var(--line)] hover:border-[var(--line-strong)] transition-all flex flex-col space-y-2"
                     >
                       <Link
                         href={report.status === "completed"
-                          ? `/report/${report.id || report._id || report.report_id}`
-                          : `/run/${report.id || report._id || report.report_id}`}
+                          ? `/report/${report.report_id}`
+                          : `/run/${report.report_id}`}
                         className="text-xs font-medium text-[var(--ink)] group-hover:text-[var(--accent)] transition-colors line-clamp-2"
                       >
                         {report.query || report.executive_title || "Untitled Research"}
@@ -461,12 +466,12 @@ function ResearchStudioContent() {
                     >
                       <Database className="w-3.5 h-3.5 text-[var(--accent)]" />
                       <span>Source library</span>
-                      {vaultDocs.some((d) => (d.chunk_count || 0) > 0) && (
+                      {vaultDocs.some((document) => document.index_status === "searchable") && (
                         <span className="text-[10px] font-mono px-1.5 py-0.2 rounded bg-[var(--surface)] text-[var(--ink)] border border-[var(--line)] font-semibold">
-                          {includeDocs ? selectedDocs.length : 0}/{vaultDocs.filter((d) => (d.chunk_count || 0) > 0).length}
+                          {includeDocs ? selectedDocs.length : 0}/{vaultDocs.filter((document) => document.index_status === "searchable").length}
                         </span>
                       )}
-                      {vaultDocs.length > 0 && !vaultDocs.some((d) => (d.chunk_count || 0) > 0) && (
+                      {vaultDocs.length > 0 && !vaultDocs.some((document) => document.index_status === "searchable") && (
                         <span className="text-[10px] text-[var(--warn)]">None indexed</span>
                       )}
                       <ChevronDown className="w-3 h-3 text-[var(--ink-3)] ml-0.5" />
@@ -484,7 +489,7 @@ function ResearchStudioContent() {
                               type="button"
                               aria-label="Select all indexed sources"
                               onClick={() => {
-                                const searchableDocs = vaultDocs.filter((d) => (d.chunk_count || 0) > 0);
+                                const searchableDocs = vaultDocs.filter((document) => document.index_status === "searchable");
                                 setSelectedDocs(searchableDocs.map((d) => d.doc_name));
                                 setIncludeDocs(searchableDocs.length > 0);
                               }}
@@ -518,11 +523,12 @@ function ResearchStudioContent() {
                           <div className="max-h-48 overflow-y-auto space-y-1.5 pr-1">
                             {vaultDocs.map((doc) => {
                               const isSelected = includeDocs && selectedDocs.includes(doc.doc_name);
+                              const isSearchable = doc.index_status === "searchable";
                               return (
                                 <label
                                   key={doc.doc_name}
-                                  aria-disabled={(doc.chunk_count || 0) === 0}
-                                  className={`flex items-center justify-between p-2 rounded-[6px] border text-xs transition-colors ${(doc.chunk_count || 0) === 0 ? "cursor-not-allowed opacity-70" : "cursor-pointer"} ${
+                                  aria-disabled={!isSearchable}
+                                  className={`flex items-center justify-between p-2 rounded-[6px] border text-xs transition-colors ${!isSearchable ? "cursor-not-allowed opacity-70" : "cursor-pointer"} ${
                                     isSelected
                                       ? "bg-[var(--accent-soft)] border-[var(--accent)]/50 text-[var(--ink)]"
                                       : "bg-[var(--surface-2)] border-[var(--line)] text-[var(--ink-2)] hover:border-[var(--line-strong)]"
@@ -532,8 +538,8 @@ function ResearchStudioContent() {
                                     <input
                                       type="checkbox"
                                       checked={isSelected}
-                                      disabled={(doc.chunk_count || 0) === 0}
-                                      aria-label={`${doc.doc_name}${(doc.chunk_count || 0) === 0 ? " — not indexed, open source library to index" : ""}`}
+                                      disabled={!isSearchable}
+                                      aria-label={`${doc.doc_name}${!isSearchable ? " — not indexed, open source library to index" : ""}`}
                                       onChange={(e) => {
                                         if (e.target.checked) {
                                           setSelectedDocs([...selectedDocs, doc.doc_name]);
@@ -548,7 +554,7 @@ function ResearchStudioContent() {
                                     />
                                     <span className="min-w-0">
                                       <span className="truncate block">{doc.doc_name}</span>
-                                      {(doc.chunk_count || 0) === 0 && <span className="block text-[10px] text-[var(--warn)]">Not indexed · prepare it in the library</span>}
+                                      {!isSearchable && <span className="block text-[10px] text-[var(--warn)]">Not indexed · prepare it in the library</span>}
                                     </span>
                                   </div>
                                   <span className="text-[10px] font-mono text-[var(--ink-3)] ml-2">
