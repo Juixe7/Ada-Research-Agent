@@ -180,7 +180,7 @@ The critic identifies coverage gaps and contradictory evidence. The arbiter can 
 
 ### 4.4 Report follow-up
 
-Follow-up questions rank the report's saved evidence and generate an answer from relevant passages. The endpoint does not silently expand into a new web search when the report has no relevant saved evidence; callers receive an insufficiency response. A source-specific question is restricted to the selected source. Addendum/sub-investigation endpoints are distinct workflows and may launch additional investigation based on their request and saved report context.
+Follow-up questions rank the report's saved evidence and generate an answer from relevant passages. The endpoint does not silently expand into a new web search when the report has no relevant saved evidence; callers receive an insufficiency response. A source-specific question is restricted to the selected source. Addenda can launch a focused investigation using the request and saved report context.
 
 ### 4.5 LLM gateway and observability
 
@@ -257,8 +257,7 @@ All paths below are relative to the backend origin (default `http://localhost:80
 | `POST /api/research` | `{query,depth="deep",include_user_docs=true,selected_docs?,clarification_choice?,custom_angles?,session_id?,blocked_domains?}` + bearer | Accepted run/report identifier and initial lifecycle metadata; processing continues asynchronously | 200; 401/404/422; 503 if dispatch unavailable |
 | `POST /api/research/{report_id}/cancel` | Bearer token | Latest known run state after cancellation is requested | 200; 404 private/missing |
 | `GET /api/report/status/{report_id}` | Optional bearer | Job state including status, stage, progress and error as available | 200; 404 private/missing |
-| `GET /api/report/{report_id}` | Optional bearer | Persisted report JSON | 200; 404 private/missing/unavailable |
-| `GET /api/v1/runs/{report_id}/report` | Same as report endpoint | Legacy/versioned alias | Same |
+| `GET /api/v1/runs/{report_id}/report` | Optional bearer | Persisted report JSON; legacy artifacts are read when present | 200; 404 private/missing/unavailable |
 | `GET /api/v1/runs/{run_id}` | Optional bearer | Normalized run metadata | 200; 404 |
 | `GET /api/v1/runs/{run_id}/events` | Optional bearer; SSE stream | `text/event-stream` run events | 200 stream; 404/authorization response |
 | `GET /api/reports` | Bearer token | User's report listing | 200; 401 |
@@ -271,8 +270,7 @@ All paths below are relative to the backend origin (default `http://localhost:80
 |---|---|---|---|
 | `POST /api/report/{report_id}/query-selection` | `{selected_text,question}` | Answer about selected report text using saved report evidence | 200; 404 private/missing; 422 |
 | `POST /api/report/{report_id}/query-evidence` | `{question,selected_text?}` | Evidence-grounded follow-up; may report insufficient saved evidence | 200; 404; 422 |
-| `POST /api/report/{report_id}/addendum` | `{inquiry,selected_text?,context?}` | Starts an addendum/sub-investigation workflow | 200; 404; 422 |
-| `POST /api/report/{report_id}/sub-investigation` | Same request as addendum (alias) | Same behavior | Same |
+| `POST /api/report/{report_id}/addendum` | `{inquiry,selected_text?,context?}` | Starts a focused addendum investigation | 200; 404; 422 |
 | `POST /api/report/{report_id}/query-source` | `{source_id,question}` | Answer constrained to one report source | 200; 404; 422 |
 
 ### Vault and document ingestion
