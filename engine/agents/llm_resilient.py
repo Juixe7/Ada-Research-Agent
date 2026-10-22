@@ -83,7 +83,8 @@ def call_gateway(
     json_mode: bool = False,
     timeout: float = 40.0,
     run_id: Optional[str] = None,
-    agent_name: Optional[str] = None
+    agent_name: Optional[str] = None,
+    persist_telemetry: bool = True,
 ) -> LLMResult:
     """Invoke the configured gateway, enforce run budgets, and record telemetry.
 
@@ -97,6 +98,8 @@ def call_gateway(
         timeout: Provider call timeout in seconds.
         run_id: Optional run used for budget checks, persistence and events.
         agent_name: Optional trace/audit label.
+        persist_telemetry: Write run-scoped database telemetry only for a
+            registered Ada run. Standalone evaluations can disable those writes.
 
     Returns:
         Full gateway result, including usage, error, degradation and cache data.
@@ -108,7 +111,7 @@ def call_gateway(
     global LAST_LLM_ERROR
     gateway = get_default_gateway()
     result = None
-    if run_id:
+    if run_id and persist_telemetry:
         try:
             from engine.celery_app import get_job_state
             run_state = get_job_state(run_id) or {}
@@ -141,7 +144,7 @@ def call_gateway(
             agent_name=agent_name
         )
     LAST_LLM_ERROR = result.error
-    if run_id:
+    if run_id and persist_telemetry:
         try:
             from engine.storage.relational_store import RelationalStore
             from packages.llm_gateway.tracing import trace_id_for_run

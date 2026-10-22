@@ -1,0 +1,270 @@
+{
+  "benchmark": "FlashAttention-3 claim-support benchmark",
+  "benchmark_version": "1.0.0",
+  "prompt_version": "partial-calibrated-v2",
+  "provenance": "24 balanced, manually authored and source-checked claim/evidence pairs based on Ada's public-only FlashAttention-3 run. Evidence is paraphrased from the paper and author blog. This narrow benchmark evaluates claim-verdict behavior, not end-to-end research quality.",
+  "sources": [
+    {
+      "title": "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision (paper)",
+      "url": "https://arxiv.org/html/2407.08608v1"
+    },
+    {
+      "title": "FlashAttention-3 author blog",
+      "url": "https://tridao.me/blog/2024/flash3/"
+    }
+  ],
+  "run_id": "claim-eval-20261022T132641Z-35c47dab",
+  "batch_size": 8,
+  "batch_count": 3,
+  "model": "groq/openai/gpt-oss-120b",
+  "latency_ms": 7587.91,
+  "tokens": {
+    "input": 2872,
+    "output": 2682
+  },
+  "estimated_cost_usd": 0.0,
+  "cache_hit": false,
+  "degraded": false,
+  "batches": [
+    {
+      "first_case": "sup-01",
+      "case_count": 8,
+      "verdicts_returned": 8,
+      "response_parsed": true,
+      "model": "groq/openai/gpt-oss-120b",
+      "latency_ms": 2933.47,
+      "input_tokens": 947,
+      "output_tokens": 829,
+      "cache_hit": false,
+      "degraded": false,
+      "response_preview": null
+    },
+    {
+      "first_case": "par-01",
+      "case_count": 8,
+      "verdicts_returned": 8,
+      "response_parsed": true,
+      "model": "groq/openai/gpt-oss-120b",
+      "latency_ms": 2510.66,
+      "input_tokens": 969,
+      "output_tokens": 980,
+      "cache_hit": false,
+      "degraded": false,
+      "response_preview": null
+    },
+    {
+      "first_case": "uns-01",
+      "case_count": 8,
+      "verdicts_returned": 8,
+      "response_parsed": true,
+      "model": "groq/openai/gpt-oss-120b",
+      "latency_ms": 2143.78,
+      "input_tokens": 956,
+      "output_tokens": 873,
+      "cache_hit": false,
+      "degraded": false,
+      "response_preview": null
+    }
+  ],
+  "langfuse_enabled": false,
+  "langfuse_health": "disabled",
+  "langfuse_trace_id": "78165f08c6435f6280cf0c369ddf02c1",
+  "model_verdicts": [
+    {
+      "id": "sup-01",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence explicitly mentions using Tensor Core and TMA asynchrony to overlap computation and data movement."
+    },
+    {
+      "id": "sup-02",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence directly states interleaving block-wise matrix multiplication and softmax operations."
+    },
+    {
+      "id": "sup-03",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence reports up to 740 TFLOPs/s and 75% utilization for FP16 on H100."
+    },
+    {
+      "id": "sup-04",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence reports FP8 performance close to 1.2 PFLOPs/s."
+    },
+    {
+      "id": "sup-05",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence gives speedups of 1.5x‑2.0x over FlashAttention‑2 for FP16 on H100."
+    },
+    {
+      "id": "sup-06",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence notes 2.6× lower numerical error for FP8 compared to a baseline implementation."
+    },
+    {
+      "id": "sup-07",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence states FlashAttention‑2 reached 35% utilization on H100."
+    },
+    {
+      "id": "sup-08",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence lists block quantization and incoherent processing as techniques for FP8 hardware support."
+    },
+    {
+      "id": "par-01",
+      "expected": "partial",
+      "predicted": "partial",
+      "reason": "Evidence supports a 1.5x‑2.0x speedup for attention on H100 with FP16 versus FlashAttention‑2, not for every Transformer workload."
+    },
+    {
+      "id": "par-02",
+      "expected": "partial",
+      "predicted": "partial",
+      "reason": "Evidence shows a 2.6× lower numerical error for FP8 only; no FP16 error reduction is reported."
+    },
+    {
+      "id": "par-03",
+      "expected": "partial",
+      "predicted": "partial",
+      "reason": "Evidence reports up to 75% utilization on the H100 GPU for FP16, not on all Hopper GPUs."
+    },
+    {
+      "id": "par-04",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Evidence lists multiple techniques (asynchrony, interleaving, low‑precision), indicating performance gains are not due solely to asynchrony."
+    },
+    {
+      "id": "par-05",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Evidence states performance up to 740 TFLOPs/s on H100, not exactly that value for every H100 configuration."
+    },
+    {
+      "id": "par-06",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Evidence compares FP8 to a baseline FP8 implementation; it does not compare FP8 to FP16 accuracy."
+    },
+    {
+      "id": "par-07",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Evidence only provides results for Hopper H100, with no data on other GPU architectures."
+    },
+    {
+      "id": "par-08",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Evidence concerns attention‑level speedup versus FlashAttention‑2 on H100, not end‑to‑end LLM serving latency."
+    },
+    {
+      "id": "uns-01",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Evidence states 740 TFLOPs/s is achieved with FP16, not FP8."
+    },
+    {
+      "id": "uns-02",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Evidence indicates the ~1.2 PFLOPs/s result is for FP8, while FP16 reaches up to 740 TFLOPs/s."
+    },
+    {
+      "id": "uns-03",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Evidence reports a speedup of 1.5x‑2.0x over FlashAttention‑2, not 10x."
+    },
+    {
+      "id": "uns-04",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Evidence shows FlashAttention‑2 had 35% utilization, FlashAttention‑3 up to 75%."
+    },
+    {
+      "id": "uns-05",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Evidence says numerical error is 2.6x lower than baseline FP8, not higher."
+    },
+    {
+      "id": "uns-06",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Evidence specifies the 740 TFLOPs/s FP16 result was measured on H100, not A100."
+    },
+    {
+      "id": "uns-07",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Evidence describes use of asynchronous Tensor Core and TMA to overlap computation and data movement."
+    },
+    {
+      "id": "uns-08",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Evidence attributes ~1.2 PFLOPs/s to FP8, while FP16 reaches up to 740 TFLOPs/s."
+    }
+  ],
+  "metrics": {
+    "examples": 24,
+    "answered": 24,
+    "accuracy": 0.7917,
+    "macro_f1": 0.7691,
+    "per_class": {
+      "supported": {
+        "support": 8,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "partial": {
+        "support": 8,
+        "precision": 1.0,
+        "recall": 0.375,
+        "f1": 0.5455
+      },
+      "unsupported": {
+        "support": 8,
+        "precision": 0.6154,
+        "recall": 1.0,
+        "f1": 0.7619
+      }
+    },
+    "confusion_matrix": {
+      "supported": {
+        "supported": 8,
+        "partial": 0,
+        "unsupported": 0,
+        "unanswered": 0
+      },
+      "partial": {
+        "supported": 0,
+        "partial": 3,
+        "unsupported": 5,
+        "unanswered": 0
+      },
+      "unsupported": {
+        "supported": 0,
+        "partial": 0,
+        "unsupported": 8,
+        "unanswered": 0
+      }
+    }
+  },
+  "limitations": [
+    "This narrow single-topic benchmark measures claim-verdict behavior, not end-to-end research quality or general-domain accuracy.",
+    "Claim-support judgments are model outputs and require human review before being treated as labels.",
+    "A missing or invalid verdict is counted as unanswered, not silently dropped.",
+    "Langfuse trace delivery is not confirmed unless langfuse_health is healthy."
+  ]
+}

@@ -103,7 +103,7 @@ The current implementation is a modular monolith with a separately runnable work
 │   ├── sessions.py         # Session and turn endpoints
 │   └── tasks.py            # Sync pipeline entry point and Celery task
 ├── packages/llm_gateway/   # Model groups, LiteLLM client, cache, limiter and trace IDs
-├── evals/                  # Versioned synthetic claim-support smoke dataset
+├── evals/                  # Versioned, source-checked claim-support benchmark
 ├── frontend/src/
 │   ├── app/                # Next.js routes and global styles
 │   ├── components/         # Shared UI plus focused run and vault panels
@@ -372,13 +372,15 @@ Live provider and web-retrieval checks are marked as integration tests and are e
 
 #### Claim-support evaluation
 
-`evals/claim_support_smoke.json` is a small, versioned set of synthetic claim/evidence pairs spanning supported, partial, and unsupported judgments. It is intended to smoke-check the claim judge and evaluation reporting, not to estimate Ada's real-world accuracy. Run it against the configured judge model with:
+`evals/claim_support_benchmark.json` is a versioned set of 24 manually authored and source-checked claims based on Ada's public-only FlashAttention-3 research run. It is balanced across supported, partial, and unsupported labels. The evidence is paraphrased from the paper and author blog. This narrow benchmark exercises the claim judge, not end-to-end research quality or general-domain accuracy. Run it against the configured judge model with:
 
 ```powershell
 .\.venv\Scripts\python.exe scripts\evaluate_claim_support.py --output output\claim-eval.json
 ```
 
-The runner makes a provider call, emits a run ID that can be searched in local Langfuse, and reports accuracy, macro-F1, per-class precision/recall/F1, and a confusion matrix. Missing or malformed verdicts count as unanswered. CI validates the dataset and metric calculations without calling an LLM. Do not claim these synthetic scores as product benchmark results; a representative, human-reviewed dataset is needed for that.
+The runner makes a provider call, emits a run ID that can be searched in local Langfuse, and reports accuracy, macro-F1, per-class precision/recall/F1, and a confusion matrix. Missing or malformed verdicts count as unanswered. CI validates the dataset and metric calculations without calling an LLM. Treat results as evidence about this focused benchmark only; add independently reviewed topics before generalizing.
+
+A same-model prompt comparison on the 24-case set produced 70.83% accuracy / 0.6393 macro-F1 with `legacy-v1`, and 79.17% / 0.7691 with `partial-calibrated-v2`. Partial-class recall moved from 1/8 to 3/8; five partial claims are still misclassified as unsupported. These are single runs on one topic, not a general accuracy claim. The reports, per-case verdicts, and confusion matrices are in [`evals/results`](evals/results/README.md); the comparison figure is [`claim-verifier-prompt-comparison.png`](evals/results/claim-verifier-prompt-comparison.png). Langfuse was disabled for the complete comparison runs, so those run IDs do not have confirmed Langfuse traces.
 
 ### Docker Compose
 

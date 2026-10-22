@@ -1,0 +1,267 @@
+{
+  "benchmark": "FlashAttention-3 claim-support benchmark",
+  "benchmark_version": "1.0.0",
+  "prompt_version": "partial-calibrated-v2",
+  "provenance": "24 balanced, manually authored and source-checked claim/evidence pairs based on Ada's public-only FlashAttention-3 run. Evidence is paraphrased from the paper and author blog. This narrow benchmark evaluates claim-verdict behavior, not end-to-end research quality.",
+  "sources": [
+    {
+      "title": "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision (paper)",
+      "url": "https://arxiv.org/html/2407.08608v1"
+    },
+    {
+      "title": "FlashAttention-3 author blog",
+      "url": "https://tridao.me/blog/2024/flash3/"
+    }
+  ],
+  "run_id": "claim-eval-20261022T121205Z-be428e39",
+  "batch_size": 8,
+  "batch_count": 3,
+  "model": [
+    "gemini/gemini-flash-latest",
+    "groq/qwen/qwen3.8-27b"
+  ],
+  "latency_ms": 7199.1,
+  "tokens": {
+    "input": 1789,
+    "output": 1119
+  },
+  "estimated_cost_usd": 0.0,
+  "cache_hit": false,
+  "degraded": true,
+  "batches": [
+    {
+      "first_case": "sup-01",
+      "case_count": 8,
+      "verdicts_returned": 0,
+      "model": "gemini/gemini-flash-latest",
+      "latency_ms": 0.0,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_hit": false,
+      "degraded": true
+    },
+    {
+      "first_case": "par-01",
+      "case_count": 8,
+      "verdicts_returned": 0,
+      "model": "groq/qwen/qwen3.8-27b",
+      "latency_ms": 1346.51,
+      "input_tokens": 893,
+      "output_tokens": 556,
+      "cache_hit": false,
+      "degraded": false
+    },
+    {
+      "first_case": "uns-01",
+      "case_count": 8,
+      "verdicts_returned": 0,
+      "model": "groq/qwen/qwen3.8-27b",
+      "latency_ms": 5852.59,
+      "input_tokens": 896,
+      "output_tokens": 563,
+      "cache_hit": false,
+      "degraded": false
+    }
+  ],
+  "langfuse_enabled": false,
+  "langfuse_health": "disabled",
+  "langfuse_trace_id": "1dcf3974478e58f68e0b08f8d8827436",
+  "model_verdicts": [
+    {
+      "id": "sup-01",
+      "expected": "supported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "sup-02",
+      "expected": "supported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "sup-03",
+      "expected": "supported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "sup-04",
+      "expected": "supported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "sup-05",
+      "expected": "supported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "sup-06",
+      "expected": "supported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "sup-07",
+      "expected": "supported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "sup-08",
+      "expected": "supported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "par-01",
+      "expected": "partial",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "par-02",
+      "expected": "partial",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "par-03",
+      "expected": "partial",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "par-04",
+      "expected": "partial",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "par-05",
+      "expected": "partial",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "par-06",
+      "expected": "partial",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "par-07",
+      "expected": "partial",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "par-08",
+      "expected": "partial",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-01",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-02",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-03",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-04",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-05",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-06",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-07",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-08",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    }
+  ],
+  "metrics": {
+    "examples": 24,
+    "answered": 0,
+    "accuracy": 0.0,
+    "macro_f1": 0.0,
+    "per_class": {
+      "supported": {
+        "support": 8,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "partial": {
+        "support": 8,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "unsupported": {
+        "support": 8,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    },
+    "confusion_matrix": {
+      "supported": {
+        "supported": 0,
+        "partial": 0,
+        "unsupported": 0,
+        "unanswered": 8
+      },
+      "partial": {
+        "supported": 0,
+        "partial": 0,
+        "unsupported": 0,
+        "unanswered": 8
+      },
+      "unsupported": {
+        "supported": 0,
+        "partial": 0,
+        "unsupported": 0,
+        "unanswered": 8
+      }
+    }
+  },
+  "limitations": [
+    "This narrow single-topic benchmark measures claim-verdict behavior, not end-to-end research quality or general-domain accuracy.",
+    "Claim-support judgments are model outputs and require human review before being treated as labels.",
+    "A missing or invalid verdict is counted as unanswered, not silently dropped.",
+    "Langfuse trace delivery is not confirmed unless langfuse_health is healthy."
+  ]
+}

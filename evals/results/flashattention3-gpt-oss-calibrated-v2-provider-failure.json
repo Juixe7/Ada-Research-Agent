@@ -1,0 +1,273 @@
+{
+  "benchmark": "FlashAttention-3 claim-support benchmark",
+  "benchmark_version": "1.0.0",
+  "prompt_version": "partial-calibrated-v2",
+  "provenance": "24 balanced, manually authored and source-checked claim/evidence pairs based on Ada's public-only FlashAttention-3 run. Evidence is paraphrased from the paper and author blog. This narrow benchmark evaluates claim-verdict behavior, not end-to-end research quality.",
+  "sources": [
+    {
+      "title": "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision (paper)",
+      "url": "https://arxiv.org/html/2407.08608v1"
+    },
+    {
+      "title": "FlashAttention-3 author blog",
+      "url": "https://tridao.me/blog/2024/flash3/"
+    }
+  ],
+  "run_id": "claim-eval-20261022T132712Z-7bbfaeb5",
+  "batch_size": 8,
+  "batch_count": 3,
+  "model": [
+    "gemini/gemini-flash-latest",
+    "groq/openai/gpt-oss-120b"
+  ],
+  "latency_ms": 10843.09,
+  "tokens": {
+    "input": 1916,
+    "output": 1838
+  },
+  "estimated_cost_usd": 0.0,
+  "cache_hit": false,
+  "degraded": true,
+  "batches": [
+    {
+      "first_case": "sup-01",
+      "case_count": 8,
+      "verdicts_returned": 8,
+      "response_parsed": true,
+      "model": "groq/openai/gpt-oss-120b",
+      "latency_ms": 4705.44,
+      "input_tokens": 947,
+      "output_tokens": 848,
+      "cache_hit": false,
+      "degraded": false,
+      "response_preview": null
+    },
+    {
+      "first_case": "par-01",
+      "case_count": 8,
+      "verdicts_returned": 8,
+      "response_parsed": false,
+      "model": "groq/openai/gpt-oss-120b",
+      "latency_ms": 6137.65,
+      "input_tokens": 969,
+      "output_tokens": 990,
+      "cache_hit": false,
+      "degraded": false,
+      "response_preview": null
+    },
+    {
+      "first_case": "uns-01",
+      "case_count": 8,
+      "verdicts_returned": 0,
+      "response_parsed": false,
+      "model": "gemini/gemini-flash-latest",
+      "latency_ms": 0.0,
+      "input_tokens": 0,
+      "output_tokens": 0,
+      "cache_hit": false,
+      "degraded": true,
+      "response_preview": ""
+    }
+  ],
+  "langfuse_enabled": false,
+  "langfuse_health": "disabled",
+  "langfuse_trace_id": "db591c0f518b567e9c0a1c4708df4f3c",
+  "model_verdicts": [
+    {
+      "id": "sup-01",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence states the paper describes using Tensor Core and TMA asynchrony to overlap computation and data movement, matching the claim."
+    },
+    {
+      "id": "sup-02",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence explicitly mentions interleaving block-wise matrix multiplication and softmax operations, which aligns with the claim."
+    },
+    {
+      "id": "sup-03",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence reports up to 740 TFLOPs/s and 75% H100 utilization for FP16 FlashAttention-3, directly supporting the claim."
+    },
+    {
+      "id": "sup-04",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence says FP8 FlashAttention-3 performance is close to 1.2 PFLOPs/s, matching the claim."
+    },
+    {
+      "id": "sup-05",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence indicates FlashAttention-3 speedups of 1.5x to 2.0x over FlashAttention-2 on H100 with FP16, exactly as claimed."
+    },
+    {
+      "id": "sup-06",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence reports 2.6x lower numerical error for FP8 FlashAttention-3 compared to a baseline, supporting the claim."
+    },
+    {
+      "id": "sup-07",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence describes FlashAttention-2 reaching 35% utilization on H100, which aligns with the claim."
+    },
+    {
+      "id": "sup-08",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Evidence lists block quantization and incoherent processing as techniques for using hardware support for low-precision FP8, confirming the claim."
+    },
+    {
+      "id": "par-01",
+      "expected": "partial",
+      "predicted": "partial",
+      "reason": "Evidence supports a 1.5x‑2.0x speedup for attention on H100 with FP16 versus FlashAttention‑2, not for every Transformer workload."
+    },
+    {
+      "id": "par-02",
+      "expected": "partial",
+      "predicted": "partial",
+      "reason": "Evidence shows a 2.6× lower numerical error for FP8 only; no FP16 error reduction is reported."
+    },
+    {
+      "id": "par-03",
+      "expected": "partial",
+      "predicted": "partial",
+      "reason": "Evidence reports up to 75% utilization on the H100 GPU for FP16, not on all Hopper GPUs."
+    },
+    {
+      "id": "par-04",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Evidence lists multiple techniques (asynchrony, interleaving, low‑precision), so asynchrony alone does not account for all performance gains."
+    },
+    {
+      "id": "par-05",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Evidence indicates performance up to 740 TFLOPs/s on H100, not exactly that value for every H100 configuration."
+    },
+    {
+      "id": "par-06",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Evidence compares FP8 to a baseline FP8 implementation, without any comparison to FP16 accuracy."
+    },
+    {
+      "id": "par-07",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Evidence is limited to Hopper H100 results and does not establish equal speedups across all GPU architectures."
+    },
+    {
+      "id": "par-08",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Evidence concerns attention‑level speedup versus FlashAttention‑2 on H100, not end‑to‑end LLM serving latency."
+    },
+    {
+      "id": "uns-01",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-02",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-03",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-04",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-05",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-06",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-07",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    },
+    {
+      "id": "uns-08",
+      "expected": "unsupported",
+      "predicted": null,
+      "reason": null
+    }
+  ],
+  "metrics": {
+    "examples": 24,
+    "answered": 16,
+    "accuracy": 0.4583,
+    "macro_f1": 0.5152,
+    "per_class": {
+      "supported": {
+        "support": 8,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "partial": {
+        "support": 8,
+        "precision": 1.0,
+        "recall": 0.375,
+        "f1": 0.5455
+      },
+      "unsupported": {
+        "support": 8,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      }
+    },
+    "confusion_matrix": {
+      "supported": {
+        "supported": 8,
+        "partial": 0,
+        "unsupported": 0,
+        "unanswered": 0
+      },
+      "partial": {
+        "supported": 0,
+        "partial": 3,
+        "unsupported": 5,
+        "unanswered": 0
+      },
+      "unsupported": {
+        "supported": 0,
+        "partial": 0,
+        "unsupported": 0,
+        "unanswered": 8
+      }
+    }
+  },
+  "limitations": [
+    "This narrow single-topic benchmark measures claim-verdict behavior, not end-to-end research quality or general-domain accuracy.",
+    "Claim-support judgments are model outputs and require human review before being treated as labels.",
+    "A missing or invalid verdict is counted as unanswered, not silently dropped.",
+    "Langfuse trace delivery is not confirmed unless langfuse_health is healthy."
+  ]
+}

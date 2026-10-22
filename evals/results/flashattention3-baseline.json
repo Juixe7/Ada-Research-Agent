@@ -1,0 +1,227 @@
+{
+  "benchmark": "FlashAttention-3 claim-support benchmark",
+  "benchmark_version": "1.0.0",
+  "provenance": "24 balanced, manually authored and source-checked claim/evidence pairs based on Ada's public-only FlashAttention-3 run. Evidence is paraphrased from the paper and author blog. This narrow benchmark evaluates claim-verdict behavior, not end-to-end research quality.",
+  "sources": [
+    {
+      "title": "FlashAttention-3: Fast and Accurate Attention with Asynchrony and Low-precision (paper)",
+      "url": "https://arxiv.org/html/2407.08608v1"
+    },
+    {
+      "title": "FlashAttention-3 author blog",
+      "url": "https://tridao.me/blog/2024/flash3/"
+    }
+  ],
+  "run_id": "claim-eval-20261022T120609Z",
+  "langfuse_enabled": true,
+  "langfuse_trace_id": "c01827d67e645828bb9fb7bf05d8e7dd",
+  "model_verdicts": [
+    {
+      "id": "sup-01",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Claim is supported by the evidence."
+    },
+    {
+      "id": "sup-02",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Claim is supported by the evidence."
+    },
+    {
+      "id": "sup-03",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Claim is supported by the evidence."
+    },
+    {
+      "id": "sup-04",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Claim is supported by the evidence."
+    },
+    {
+      "id": "sup-05",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Claim is supported by the evidence."
+    },
+    {
+      "id": "sup-06",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Claim is supported by the evidence."
+    },
+    {
+      "id": "sup-07",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Claim is supported by the evidence."
+    },
+    {
+      "id": "sup-08",
+      "expected": "supported",
+      "predicted": "supported",
+      "reason": "Claim is supported by the evidence."
+    },
+    {
+      "id": "par-01",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "par-02",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "par-03",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "par-04",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "par-05",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "par-06",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "par-07",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "par-08",
+      "expected": "partial",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "uns-01",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "uns-02",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "uns-03",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "uns-04",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "uns-05",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "uns-06",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "uns-07",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    },
+    {
+      "id": "uns-08",
+      "expected": "unsupported",
+      "predicted": "unsupported",
+      "reason": "Claim is not supported by the evidence."
+    }
+  ],
+  "metrics": {
+    "examples": 24,
+    "answered": 24,
+    "accuracy": 0.6667,
+    "macro_f1": 0.5556,
+    "per_class": {
+      "supported": {
+        "support": 8,
+        "precision": 1.0,
+        "recall": 1.0,
+        "f1": 1.0
+      },
+      "partial": {
+        "support": 8,
+        "precision": 0.0,
+        "recall": 0.0,
+        "f1": 0.0
+      },
+      "unsupported": {
+        "support": 8,
+        "precision": 0.5,
+        "recall": 1.0,
+        "f1": 0.6667
+      }
+    },
+    "confusion_matrix": {
+      "supported": {
+        "supported": 8,
+        "partial": 0,
+        "unsupported": 0,
+        "unanswered": 0
+      },
+      "partial": {
+        "supported": 0,
+        "partial": 0,
+        "unsupported": 8,
+        "unanswered": 0
+      },
+      "unsupported": {
+        "supported": 0,
+        "partial": 0,
+        "unsupported": 8,
+        "unanswered": 0
+      }
+    }
+  },
+  "limitations": [
+    "This narrow single-topic benchmark measures claim-verdict behavior, not end-to-end research quality or general-domain accuracy.",
+    "Claim-support judgments are model outputs and require human review before being treated as labels.",
+    "A missing or invalid verdict is counted as unanswered, not silently dropped."
+  ],
+  "prompt_version": "original-v1",
+  "model": "groq/qwen/qwen3.8-27b",
+  "latency_ms": 1457.43,
+  "tokens": {
+    "input": 2316,
+    "output": 403
+  },
+  "estimated_cost_usd": 0.0,
+  "cache_hit": false,
+  "degraded": false,
+  "langfuse_health": "unreachable",
+  "trace_export_status": "unconfirmed"
+}
