@@ -188,8 +188,6 @@ class AdaVectorStore:
                 "section_path": hit.payload.get("section_path"),
                 "doc_name": hit.payload.get("doc_name"),
                 "page_number": hit.payload.get("page_number"),
-                "section_path": hit.payload.get("section_path"),
-                "chunk_index": hit.payload.get("chunk_index"),
                 "text": hit.payload.get("text"),
                 "source_type": "user_doc"
             })

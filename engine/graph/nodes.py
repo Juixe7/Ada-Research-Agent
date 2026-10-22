@@ -518,7 +518,6 @@ def score_node(state: RunState) -> Dict[str, Any]:
     run_id = state.get("run_id")
     guard = state.get("guard_results", {})
     evidence = state.get("evidence_manifest", [])
-    critic = state.get("critic_findings", {})
     if _is_cancelled(run_id):
         return {}
 

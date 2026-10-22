@@ -343,7 +343,7 @@ def export_compiled_session(
 
     compiled_md = [
         f"# {session.title}",
-        f"**Compiled Autonomous Research Dossier**",
+        "**Compiled Autonomous Research Dossier**",
         f"*Total Investigation Turns: {len(turns)}*",
         "\n---\n"
     ]

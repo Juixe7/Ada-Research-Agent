@@ -1,7 +1,12 @@
 """
 Storage and Vector DB abstractions for Ada Deep Research.
 """
+from typing import TYPE_CHECKING
+
 from engine.storage.relational_store import RelationalStore
+
+if TYPE_CHECKING:
+    from engine.storage.vector_store import AdaVectorStore
 
 def get_vector_store() -> "AdaVectorStore":
     """Return the shared Qdrant vector-store instance.
