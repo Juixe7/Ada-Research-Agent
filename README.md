@@ -71,7 +71,7 @@ flowchart TB
 
 | Tier | Responsibility |
 |---|---|
-| API (`engine/server.py`, `engine/auth.py`, `engine/sessions.py`) | HTTP validation, authentication, authorization, dispatch, report/vault operations, streaming status/events. |
+| API (`engine/server.py`, `engine/auth.py`, `engine/sessions.py`) | HTTP validation, authentication, dispatch, and error translation for report, vault, run, and session operations. |
 | Service/domain (`engine/graph/`, `engine/agents/`, `engine/workers/`, `engine/tasks.py`) | Research lifecycle, planning, retrieval, evidence review, synthesis, verification, and follow-up behavior. |
 | Persistence (`engine/database.py`, `engine/models.py`, `engine/storage/`) | Relational entities, Qdrant documents, per-run records, and durable artifact references. |
 | Integrations (`packages/llm_gateway/`, `engine/ingest/`) | Model routing, rate limits, cache, provider calls, web search/fetch, document parsing, embeddings. |
@@ -89,8 +89,8 @@ The current implementation is a modular monolith with a separately runnable work
 │   ├── graph/              # LangGraph state, nodes, routing and compiled pipeline
 │   ├── guards/             # Citation and evidence grounding
 │   ├── ingest/             # PDF, DOCX, CSV, text, web retrieval and chunking
-│   ├── storage/            # Relational repository and Qdrant vector store
-│   ├── services/           # Research-run, preflight, report and vault use cases
+│   ├── storage/            # Relational repository, dossier mapping and Qdrant vector store
+│   ├── services/           # Research-run, preflight, report, session and vault use cases
 │   ├── schemas/            # API request and response DTOs
 │   ├── workers/            # Search and per-track research execution
 │   ├── auth.py             # Registration, login, JWT and password reset
@@ -123,7 +123,7 @@ The current implementation is a modular monolith with a separately runnable work
 | `engine.services.research_runs` | Creates owned sessions/turns, tracks live jobs, dispatches workers, and resolves cancellation/status fallbacks. |
 | `engine.services.preflight` | Resolves only the user's selected private documents before query scoping. |
 | `engine.services.report_followups` | Answers from saved evidence, verifies citations, and persists focused addenda. |
-| `engine.services.reports` / `engine.services.vault` | Own report access/history/sharing and private document lifecycle operations. |
+| `engine.services.reports` / `engine.services.sessions` / `engine.services.vault` | Own report access/history/sharing, session ownership and lifecycle, and private document operations. |
 | `engine.services.errors` | Provides transport-independent service errors; each use case keeps a domain-specific subtype. |
 | `engine.schemas` | Defines the Pydantic request/response contracts used by API routes. |
 | `engine.graph.pipeline` | Creates the LangGraph and seeds `RunState`; `execute_graph_pipeline(...)` returns final state. |
@@ -135,6 +135,7 @@ The current implementation is a modular monolith with a separately runnable work
 | `engine.ingest.doc_processor` | Converts supported documents into text chunks with page/heading/section metadata. |
 | `engine.storage.vector_store` | Embeds and filters vault chunks in Qdrant; each private chunk must have `user_id`. |
 | `engine.storage.relational_store` | Persists normalized run, evidence, finding, score, LLM call and event records. |
+| `engine.storage.run_dossier` | Maps loaded relational records into the report and run-inspector response shape. |
 | `engine.models` / `engine.database` | Relational schema and SQLAlchemy lifecycle. |
 | `engine.events` / `engine.celery_app` | Event streaming and asynchronous job state. |
 | `packages.llm_gateway` | Provider model groups, failover, rate limiting, response cache, structured parsing, usage and optional tracing. |
