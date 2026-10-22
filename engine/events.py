@@ -22,6 +22,7 @@ _LOCAL_EVENT_HISTORY: Dict[str, deque] = defaultdict(lambda: deque(maxlen=200))
 
 
 def _enqueue_local_event(queue: asyncio.Queue, payload: Dict[str, Any]) -> None:
+    """Queue a local event without blocking; a full subscriber queue drops it."""
     try:
         queue.put_nowait(payload)
     except asyncio.QueueFull:

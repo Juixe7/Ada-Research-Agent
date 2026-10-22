@@ -85,6 +85,7 @@ def get_redis_client() -> Optional[redis.Redis]:
 
 
 def _prune_local_jobs() -> None:
+    """Drop completed local job entries when the fallback cache exceeds its cap."""
     if len(_LOCAL_JOBS_CACHE) <= MAX_LOCAL_JOBS:
         return
     finished = [

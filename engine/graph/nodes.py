@@ -59,6 +59,7 @@ def _notify_stage(run_id: Optional[str], status: str, stage: str, progress: int,
 
 
 def _is_cancelled(run_id: Optional[str]) -> bool:
+    """Return whether the latest job state marks this run as cancelled."""
     if not run_id:
         return False
     current = get_job_state(run_id)

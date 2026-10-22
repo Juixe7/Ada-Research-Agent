@@ -71,6 +71,7 @@ _NUMBERED_HEADING_RE = re.compile(r"^\s*\d+(?:\.\d+)*[.)]?\s+(.+?)\s*$")
 
 
 def _clean_line(line: str) -> str:
+    """Collapse horizontal whitespace and trim one extracted document line."""
     return re.sub(r"[\t\u00a0 ]+", " ", line).strip()
 
 
@@ -119,6 +120,7 @@ def _heading_text(line: str) -> Optional[str]:
 
 
 def _heading_level(line: str, heading: str, has_section: bool = False) -> int:
+    """Choose a Markdown heading level from explicit and inferred section cues."""
     markdown = re.match(r"^\s*(#{1,6})\s*", line)
     if markdown:
         return min(len(markdown.group(1)), 2)
@@ -178,6 +180,7 @@ def _split_long_unit(text: str, max_chars: int) -> List[str]:
 
 
 def _overlap_tail(text: str, overlap: int) -> str:
+    """Return a word-aligned suffix to carry into the next passage."""
     if overlap <= 0 or not text:
         return ""
     tail = text[-overlap:]
@@ -287,6 +290,7 @@ def _page_chunks(
     overlap: int = 150,
     initial_section_path: Optional[str] = None,
 ) -> List[Dict[str, Any]]:
+    """Chunk one PDF page while preserving the current section path."""
     return chunk_text_with_metadata(page_text, chunk_size, overlap, page_number, initial_section_path)
 
 
