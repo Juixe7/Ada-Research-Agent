@@ -2,34 +2,12 @@
 
 import React, { useState } from "react";
 import { ArrowRight, Check, X, CornerDownRight } from "lucide-react";
-
-export interface ClarificationOption {
-  id: string;
-  title: string;
-  description?: string;
-}
-
-export interface ResearchAngle {
-  id: number | string;
-  title: string;
-  description?: string;
-  source_scope?: string;
-  enabled?: boolean;
-}
-
-export interface ScopingBlueprint {
-  ambiguity_detected?: boolean;
-  ambiguity_explanation?: string;
-  clarification_options?: ClarificationOption[];
-  research_angles?: ResearchAngle[];
-  suggested_perspective?: string;
-  estimated_duration_seconds?: number;
-}
+import type { ResearchBlueprint } from "@/lib/api-types";
 
 interface ClarificationModalProps {
   isOpen: boolean;
   query: string;
-  blueprint: ScopingBlueprint | null;
+  blueprint: ResearchBlueprint | null;
   onConfirm: (payload: { clarificationChoice: string | null; customAngles: string[] }) => void;
   onSkip: () => void;
   onClose: () => void;

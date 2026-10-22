@@ -93,12 +93,14 @@ export interface ResearchAngleOption {
 }
 
 export interface ResearchBlueprint {
+  status?: string;
   ambiguity_detected?: boolean;
   ambiguity_explanation?: string;
   clarification_options?: ClarificationChoice[];
   research_angles?: ResearchAngleOption[];
   suggested_perspective?: string;
   estimated_duration_seconds?: number;
+  warning?: string;
   ambiguity_sources?: {
     vault?: { doc_name?: string; snippet?: string };
     web?: { entity?: string; snippet?: string };

@@ -7,7 +7,8 @@ import {
   AlertCircle, ArrowRight, Database, SlidersHorizontal
 } from "lucide-react";
 import Navbar from "@/components/Navbar";
-import ClarificationModal, { ScopingBlueprint } from "@/components/ClarificationModal";
+import ClarificationModal from "@/components/ClarificationModal";
+import type { ResearchBlueprint } from "@/lib/api-types";
 import { useAuth } from "@/context/AuthContext";
 import { API_URL } from "@/lib/config";
 
@@ -38,7 +39,7 @@ export default function PublicLandingAndDeskPage() {
 
   // Scoping Clarification Modal State (Screen 7.2)
   const [scopingModalOpen, setScopingModalOpen] = useState(false);
-  const [blueprint, setBlueprint] = useState<ScopingBlueprint | null>(null);
+  const [blueprint, setBlueprint] = useState<ResearchBlueprint | null>(null);
   const [scopingLoading, setScopingLoading] = useState(false);
   const [submitting, setSubmitting] = useState(false);
   const [errorMsg, setErrorMsg] = useState("");
@@ -128,7 +129,7 @@ export default function PublicLandingAndDeskPage() {
         });
 
         if (res.ok) {
-          const bp: ScopingBlueprint = await res.json();
+          const bp: ResearchBlueprint = await res.json();
           setBlueprint(bp);
           if (
             bp.ambiguity_detected ||
