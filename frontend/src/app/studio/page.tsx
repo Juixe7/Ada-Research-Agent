@@ -158,12 +158,12 @@ function ResearchStudioContent() {
       .then((data: VaultListResponse) => {
         if (controller.signal.aborted) return;
         const documents = data.documents;
-        const searchableDocs = documents.filter((document) => document.index_status === "searchable");
         setVaultState({
           token,
           documents,
-          selectedDocs: searchableDocs.map((document) => document.doc_name),
-          includeDocs: searchableDocs.length > 0,
+          // Loading the library must not imply consent to use its contents.
+          selectedDocs: [],
+          includeDocs: false,
           pending: false,
           error: false,
         });

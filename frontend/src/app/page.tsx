@@ -31,7 +31,9 @@ export default function PublicLandingAndDeskPage() {
   // Screen 7.1 Input & Settings State
   const [query, setQuery] = useState("");
   const [depth, setDepth] = useState<"quick" | "standard" | "deep">("standard");
-  const [useDocuments, setUseDocuments] = useState(true);
+  // Private vault sources are opt-in so a new research request never includes
+  // personal documents unless the user explicitly enables them.
+  const [useDocuments, setUseDocuments] = useState(false);
   const [documentCount, setDocumentCount] = useState(0);
   const [domainScope, setDomainScope] = useState<"all" | "academic" | "financial">("all");
   const [moreOptionsOpen, setMoreOptionsOpen] = useState(false);
@@ -317,8 +319,9 @@ export default function PublicLandingAndDeskPage() {
               <button
                 type="button"
                 onClick={() => setUseDocuments(!useDocuments)}
+                aria-pressed={useDocuments}
                 className={`chip ${useDocuments ? "chip-active" : ""}`}
-                title="Cross-reference private vault documents"
+                title={`${useDocuments ? "Exclude" : "Include"} all ${documentCount} private vault documents`}
               >
                 <Database className="w-3.5 h-3.5" />
                 <span>Vault ({documentCount})</span>
